@@ -43,9 +43,12 @@ def create_scheduler() -> AsyncIOScheduler:
 
 async def _safe_poll_market() -> None:
     """Wrapped poll that guards against crashes killing the scheduler."""
-    from app.engine.market_calendar import is_market_open
-    if not is_market_open():
-        logger.debug("Market closed — skipping poll.")
+    from app.engine.market_calendar import is_indian_market_open, is_market_open
+    # Watchlists mix US (Finnhub) and Indian (yfinance) symbols, and NSE hours
+    # (9:15-15:30 IST) barely overlap US hours — gating on US-only would mean
+    # .NS/.BO symbols almost never get polled. Poll whenever either is open.
+    if not (is_market_open() or is_indian_market_open()):
+        logger.debug("Both US and Indian markets closed — skipping poll.")
         return
     try:
         from app.services.ingestion_service import poll_market_data

@@ -49,6 +49,12 @@ class MarketDataProvider(ABC):
         ...
 
     @abstractmethod
+    async def get_company_name(self, symbol: str) -> str | None:
+        """Best-effort company name lookup, used when resolving a ticker
+        that isn't already in the local symbols catalog."""
+        ...
+
+    @abstractmethod
     async def get_candles(
         self,
         symbol: str,

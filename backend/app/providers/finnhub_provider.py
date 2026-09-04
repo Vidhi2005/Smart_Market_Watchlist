@@ -87,6 +87,15 @@ class FinnhubProvider(MarketDataProvider):
             source="finnhub",
         )
 
+    # ── Company profile ──────────────────────────────────────────────────────
+
+    async def get_company_name(self, symbol: str) -> str | None:
+        data = await self._get("/stock/profile2", {"symbol": symbol})
+        if not data or not isinstance(data, dict):
+            return None
+        name = data.get("name")
+        return name.strip() if name else None
+
     # ── Candles ───────────────────────────────────────────────────────────────
 
     async def get_candles(

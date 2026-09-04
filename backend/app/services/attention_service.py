@@ -123,6 +123,7 @@ async def get_changes(
 
         sigs = best_event.signals
         stock_pct = float(sigs.get("stock_pct_change", 0))
+        bench_pct = float(sigs.get("bench_pct_change", 0))
         freshness = snap.quality_status if snap else "STALE"
 
         items.append(
@@ -140,6 +141,8 @@ async def get_changes(
                 current_price=snap.price if snap else None,
                 price_change_pct=round(stock_pct, 4),
                 volume=snap.volume if snap else None,
+                avg_volume_30d=round(avg_vol, 2) if avg_vol else None,
+                benchmark_change_pct=round(bench_pct, 4),
                 latest_news=[
                     NewsEventOut(
                         id=n.id,

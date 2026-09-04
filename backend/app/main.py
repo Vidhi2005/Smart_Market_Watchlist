@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+from app.routers.auth import router as auth_router
 from app.routers.dashboard import router as dashboard_router
 from app.routers.health import router as health_router
 from app.routers.watchlists import router as watchlist_router
@@ -52,6 +53,7 @@ app.add_middleware(
 )
 
 # ── Routers ───────────────────────────────────────────────────────────────────
+app.include_router(auth_router)
 app.include_router(health_router, prefix="/api")
 app.include_router(watchlist_router)
 app.include_router(stock_router)

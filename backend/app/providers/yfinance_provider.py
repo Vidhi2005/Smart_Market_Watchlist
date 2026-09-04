@@ -70,6 +70,23 @@ class YFinanceProvider(MarketDataProvider):
             logger.warning("YFinance get_quote failed for %s: %s", symbol, exc)
             return None
 
+    # ── Company profile ──────────────────────────────────────────────────────
+
+    async def get_company_name(self, symbol: str) -> str | None:
+        try:
+            import yfinance as yf
+
+            def _fetch():
+                t = yf.Ticker(symbol)
+                info = t.info  # heavier call, but only used once at add-time
+                return info.get("longName") or info.get("shortName")
+
+            name = await self._run_sync(_fetch)
+            return name.strip() if name else None
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("YFinance get_company_name failed for %s: %s", symbol, exc)
+            return None
+
     # ── Candles ───────────────────────────────────────────────────────────────
 
     async def get_candles(

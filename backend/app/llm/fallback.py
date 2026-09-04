@@ -43,6 +43,10 @@ def hallucination_check(response: str, allowed_percentages: list[float]) -> bool
     """
     import re
     found = re.findall(r"[-+]?\d+\.?\d*%", response)
+    # allowed_percentages are stored as magnitudes (abs of the real values);
+    # a stock down -2.19% legitimately renders as "-2.19%" in the model's
+    # prose, so compare magnitudes — not raw signed values — against them.
+    allowed_magnitudes = [abs(a) for a in allowed_percentages]
     for f in found:
         pct_str = f.replace("%", "").replace("+", "")
         try:
@@ -50,6 +54,6 @@ def hallucination_check(response: str, allowed_percentages: list[float]) -> bool
         except ValueError:
             return False  # Unparseable — reject
         # Allow ±0.5% tolerance
-        if not any(abs(val - a) < 0.5 for a in allowed_percentages):
+        if not any(abs(abs(val) - a) < 0.5 for a in allowed_magnitudes):
             return False
     return True

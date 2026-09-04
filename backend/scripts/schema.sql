@@ -12,6 +12,13 @@ CREATE TABLE IF NOT EXISTS users (
     display_name  VARCHAR(100) NOT NULL,
     created_at    TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
+-- Migration: real auth. Nullable so pre-existing rows don't break; app layer
+-- requires it for anyone authenticating.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255);
+-- Migration: country/timezone, captured at signup, drives timezone-correct
+-- UI (e.g. the dashboard greeting) instead of guessing from server clock.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS country VARCHAR(100);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS timezone VARCHAR(50) NOT NULL DEFAULT 'UTC';
 
 -- ── symbols ──────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS symbols (

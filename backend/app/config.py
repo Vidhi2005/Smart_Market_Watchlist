@@ -24,8 +24,16 @@ class Settings(BaseSettings):
     # ── LLM ───────────────────────────────────────────────────────────────────
     gemini_api_key: str = ""
 
+    # ── Auth ──────────────────────────────────────────────────────────────────
+    # Dev-only fallback secret — set JWT_SECRET_KEY in .env for real deployments.
+    jwt_secret_key: str = "dev-insecure-secret-change-me"
+    jwt_algorithm: str = "HS256"
+    jwt_expire_minutes: int = 60 * 24 * 7  # 7 days
+
     # ── App Behaviour ─────────────────────────────────────────────────────────
-    poll_interval_seconds: int = 300
+    # 45s keeps real headroom under Finnhub's free-tier ~60 req/min ceiling (the
+    # poll loop already sleeps 1s/symbol) while feeling "live" on the frontend.
+    poll_interval_seconds: int = 45
     log_level: str = "INFO"
 
     # ── Demo User ─────────────────────────────────────────────────────────────

@@ -55,6 +55,36 @@ async def delete_watchlist(db: AsyncSession, watchlist_id: str, user_id: str) ->
     return True
 
 
+async def _resolve_new_symbol(db: AsyncSession, ticker: str) -> Symbol | None:
+    """
+    Looks up a ticker that isn't in the local catalog yet via the live
+    provider — Finnhub for US/global tickers, yfinance for .NS/.BO — instead
+    of only ever offering the ~20 pre-seeded symbols. A real quote confirms
+    the ticker exists; the resolved row is persisted so future searches (and
+    other users) find it locally without another live lookup.
+    """
+    from app.services.ingestion_service import get_provider
+
+    provider = get_provider(ticker)
+    quote = await provider.get_quote(ticker)
+    if not quote:
+        return None  # not a real/quotable ticker
+
+    company_name = await provider.get_company_name(ticker)
+    exchange = "NSE" if ticker.endswith(".NS") else "BSE" if ticker.endswith(".BO") else None
+
+    sym = Symbol(
+        symbol=ticker,
+        company_name=company_name or ticker,
+        sector=None,
+        exchange=exchange,
+    )
+    db.add(sym)
+    await db.commit()
+    await db.refresh(sym)
+    return sym
+
+
 async def add_symbol_to_watchlist(
     db: AsyncSession, watchlist_id: str, user_id: str, ticker: str
 ) -> WatchlistItem | None:
@@ -63,11 +93,14 @@ async def add_symbol_to_watchlist(
     if not wl:
         return None
 
-    # Resolve symbol
-    sym_result = await db.execute(
-        select(Symbol).where(Symbol.symbol == ticker.upper())
-    )
+    ticker = ticker.strip().upper()
+
+    # Resolve symbol — check the local catalog first, then fall back to a
+    # live provider lookup for tickers nobody has added yet.
+    sym_result = await db.execute(select(Symbol).where(Symbol.symbol == ticker))
     sym = sym_result.scalar_one_or_none()
+    if not sym:
+        sym = await _resolve_new_symbol(db, ticker)
     if not sym:
         return None
 

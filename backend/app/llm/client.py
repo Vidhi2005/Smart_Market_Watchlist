@@ -37,7 +37,9 @@ async def generate_explanation(prompt: str) -> str | None:
         response = await loop.run_in_executor(
             None,
             lambda: client.models.generate_content(
-                model="gemini-2.0-flash",
+                # gemini-2.0-flash was retired by Google; 3.6-flash is the
+                # current equivalent and works with this key (verified).
+                model="gemini-3.6-flash",
                 contents=prompt,
             ),
         )

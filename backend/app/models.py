@@ -38,6 +38,12 @@ class User(Base):
     )
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     display_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    password_hash: Mapped[Optional[str]] = mapped_column(String(255))
+    country: Mapped[Optional[str]] = mapped_column(String(100))
+    # IANA timezone (e.g. "Asia/Kolkata") — drives timezone-correct UI like
+    # the dashboard's time-of-day greeting. Defaults to UTC so a missing
+    # value never crashes formatting, just shows a neutral greeting.
+    timezone: Mapped[str] = mapped_column(String(50), nullable=False, default="UTC")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=datetime.utcnow
     )

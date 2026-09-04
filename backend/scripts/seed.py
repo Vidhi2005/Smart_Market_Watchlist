@@ -15,9 +15,12 @@ import asyncpg
 from dotenv import load_dotenv
 import uuid as _uuid
 
+from app.auth.security import hash_password  # noqa: E402
+
 load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
 
 DEMO_USER_ID = _uuid.UUID("00000000-0000-0000-0000-000000000001")
+DEMO_PASSWORD = "demo12345"  # login: demo@smartwatchlist.dev / demo12345
 
 
 SYMBOLS = [
@@ -62,18 +65,21 @@ async def main() -> None:
         await conn.execute(schema_sql)
         print("[OK] Schema applied.")
 
-        # Insert demo user (idempotent)
+        # Insert demo user (idempotent) — also backfills password_hash for a
+        # pre-existing row from before auth existed, so it stays loggable.
         await conn.execute(
             """
-            INSERT INTO users (id, email, display_name)
-            VALUES ($1, $2, $3)
-            ON CONFLICT (id) DO NOTHING
+            INSERT INTO users (id, email, display_name, password_hash)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (id) DO UPDATE
+              SET password_hash = COALESCE(users.password_hash, EXCLUDED.password_hash)
             """,
             DEMO_USER_ID,
             "demo@smartwatchlist.dev",
             "Demo Trader",
+            hash_password(DEMO_PASSWORD),
         )
-        print(f"[OK] Demo user seeded: {DEMO_USER_ID}")
+        print(f"[OK] Demo user seeded: {DEMO_USER_ID}  (login: demo@smartwatchlist.dev / {DEMO_PASSWORD})")
 
         # Insert symbols (idempotent)
         for sym, name, sector, exchange in SYMBOLS:

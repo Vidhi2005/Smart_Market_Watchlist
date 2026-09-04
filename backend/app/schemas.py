@@ -15,6 +15,40 @@ class OrmBase(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+# ── Auth ──────────────────────────────────────────────────────────────────────
+class UserOut(OrmBase):
+    id: str
+    email: str
+    display_name: str
+    country: Optional[str] = None
+    timezone: str = "UTC"
+    created_at: datetime
+
+
+class SignupRequest(BaseModel):
+    email: str
+    password: str
+    display_name: str
+    country: Optional[str] = None
+    timezone: Optional[str] = None
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class UpdateProfileRequest(BaseModel):
+    display_name: Optional[str] = None
+    country: Optional[str] = None
+    timezone: Optional[str] = None
+
+
+class TokenResponse(BaseModel):
+    token: str
+    user: UserOut
+
+
 # ── Symbol ────────────────────────────────────────────────────────────────────
 class SymbolOut(OrmBase):
     id: str
@@ -109,6 +143,8 @@ class AttentionItem(BaseModel):
     current_price: Optional[Decimal]
     price_change_pct: Optional[float]
     volume: Optional[int]
+    avg_volume_30d: Optional[float] = None
+    benchmark_change_pct: Optional[float] = None
     latest_news: List[NewsEventOut]
     signals: SignalBreakdown
     detected_at: datetime
@@ -131,10 +167,35 @@ class DashboardSummary(BaseModel):
     high_count: int
     watch_count: int
     last_poll_at: Optional[datetime]
+    last_checked_at: Optional[datetime] = None
     market_open: bool
     us_market_open: bool = False
     indian_market_open: bool = False
 
+
+# ── Quotes (live market info, independent of attention scoring) ───────────────
+class QuoteOut(BaseModel):
+    symbol: str
+    company_name: str
+    sector: Optional[str]
+    exchange: Optional[str]
+    current_price: Optional[Decimal]
+    price_change_pct: Optional[float]
+    volume: Optional[int]
+    data_freshness: str  # FRESH | STALE | NO_DATA
+
+
+# ── Candles ───────────────────────────────────────────────────────────────────
+class CandlePoint(BaseModel):
+    timestamp: datetime
+    price: Decimal
+    volume: Optional[int] = None
+
+
+class CandlesResponse(BaseModel):
+    symbol: str
+    range: str
+    points: List[CandlePoint]
 
 
 # ── Observation ───────────────────────────────────────────────────────────────
