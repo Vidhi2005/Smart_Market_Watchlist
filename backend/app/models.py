@@ -4,7 +4,7 @@ SQLAlchemy ORM models — mirrors the schema.sql tables exactly.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
@@ -29,6 +29,19 @@ def _uuid() -> str:
     return str(uuid.uuid4())
 
 
+def _utcnow() -> datetime:
+    """
+    Timezone-AWARE UTC now — do not swap this back to bare `datetime.utcnow`.
+    That returns a naive datetime, and this stack (SQLAlchemy async + asyncpg,
+    on a machine whose local zone isn't UTC) silently reinterprets a naive
+    value as LOCAL time when writing it into a TIMESTAMPTZ column, shifting
+    every default timestamp by the local UTC offset. Confirmed by direct
+    round-trip test: a naive `datetime.utcnow()` write came back 5.5 hours
+    off on a machine set to IST. Every default below must stay aware.
+    """
+    return datetime.now(tz=timezone.utc)
+
+
 # ── users ─────────────────────────────────────────────────────────────────────
 class User(Base):
     __tablename__ = "users"
@@ -45,7 +58,7 @@ class User(Base):
     # value never crashes formatting, just shows a neutral greeting.
     timezone: Mapped[str] = mapped_column(String(50), nullable=False, default="UTC")
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=datetime.utcnow
+        DateTime(timezone=True), nullable=False, default=_utcnow
     )
 
     watchlists: Mapped[List["Watchlist"]] = relationship(
@@ -91,7 +104,7 @@ class Watchlist(Base):
     )
     name: Mapped[str] = mapped_column(String(100), nullable=False, default="My Watchlist")
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=datetime.utcnow
+        DateTime(timezone=True), nullable=False, default=_utcnow
     )
 
     user: Mapped["User"] = relationship(back_populates="watchlists")
@@ -122,7 +135,7 @@ class WatchlistItem(Base):
         nullable=False,
     )
     added_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=datetime.utcnow
+        DateTime(timezone=True), nullable=False, default=_utcnow
     )
 
     watchlist: Mapped["Watchlist"] = relationship(back_populates="items")
@@ -156,9 +169,16 @@ class MarketSnapshot(Base):
     source: Mapped[str] = mapped_column(String(50), nullable=False, default="finnhub")
     provider_timestamp: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     ingested_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=datetime.utcnow
+        DateTime(timezone=True), nullable=False, default=_utcnow
     )
     quality_status: Mapped[str] = mapped_column(String(20), nullable=False, default="FRESH")
+    # True for rows from bootstrap_historical (real daily OHLCV candles),
+    # False for rows from a live poll. A "30-day average volume" is only a
+    # real daily average if it's computed from is_daily_bar rows — live
+    # polls can carry intraday-cumulative volume (yfinance) or no volume at
+    # all (Finnhub's /quote doesn't return one), neither of which is
+    # comparable to a daily bar on its own.
+    is_daily_bar: Mapped[bool] = mapped_column(nullable=False, default=False)
 
     symbol: Mapped["Symbol"] = relationship(back_populates="snapshots")
 
@@ -185,7 +205,7 @@ class NewsEvent(Base):
     url: Mapped[Optional[str]] = mapped_column(Text)
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     ingested_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=datetime.utcnow
+        DateTime(timezone=True), nullable=False, default=_utcnow
     )
     dedup_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
 
@@ -216,7 +236,7 @@ class MarketEvent(Base):
     magnitude: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 4))
     signals: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     detected_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=datetime.utcnow
+        DateTime(timezone=True), nullable=False, default=_utcnow
     )
 
     symbol: Mapped["Symbol"] = relationship(back_populates="market_events")
@@ -244,7 +264,7 @@ class UserObservation(Base):
         primary_key=True,
     )
     last_observed_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=datetime.utcnow
+        DateTime(timezone=True), nullable=False, default=_utcnow
     )
     last_observed_snapshot_id: Mapped[Optional[str]] = mapped_column(
         UUID(as_uuid=False),
@@ -279,7 +299,7 @@ class UserAttention(Base):
     explanation: Mapped[Optional[str]] = mapped_column(Text)
     explanation_source: Mapped[str] = mapped_column(String(20), nullable=False, default="template")
     computed_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=datetime.utcnow
+        DateTime(timezone=True), nullable=False, default=_utcnow
     )
 
     event: Mapped["MarketEvent"] = relationship(back_populates="attention_records")
