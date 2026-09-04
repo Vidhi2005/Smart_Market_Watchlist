@@ -8,30 +8,96 @@ Built for the "Smart Market Watchlist" brief: create/manage a watchlist,
 view live market data, and return later to see what actually changed —
 without the obvious version of that product.
 
+**Contents:** [Architecture](#architecture-overview) ·
+[Global vs. user state](#global-market-state-vs-user-observation-state) ·
+[Event lifecycle](#event-lifecycle) ·
+[Provider resilience](#provider-resilience) ·
+[Design decisions](#key-design-decisions) ·
+[Scoring](#scoring-weight-calibration) ·
+[Demo Mode](#demo-mode) ·
+[Quick Start](#quick-start) ·
+[Project Structure](#project-structure) ·
+[Tests](#running-tests) ·
+[API Reference](#api-reference) ·
+[Scaling](#scaling-reasoning) ·
+[Known Limitations](#known-limitations)
+
 ---
 
 ## Architecture Overview
 
 ```
-┌──────────────────────────────────┐
-│    Next.js Frontend (port 3000)  │
-│    React Query · 15-20s polling  │
-└─────────────────┬─────────────────┘
-                   │ HTTP/REST + JWT bearer
-┌──────────────────▼─────────────────┐
-│    FastAPI Backend (port 8000)     │
-│    APScheduler · JWT auth          │
-└──┬───────────┬───────────┬─────────┘
-   │           │           │
-   ▼           ▼           ▼
-Finnhub      yfinance   PostgreSQL      Gemini
-(US/global)  (NSE/BSE)     DB          LLM API
+┌─────────────────────────────────────┐
+│       Next.js Frontend (:3000)       │
+│     React Query · 15–20s polling     │
+└──────────────────┬────────────────────┘
+                    │ HTTP/REST + JWT bearer
+┌───────────────────▼────────────────────┐
+│        FastAPI Backend (:8000)          │
+│        APScheduler · JWT auth           │
+└────┬─────────┬─────────┬─────────┬──────┘
+     │         │         │         │
+     ▼         ▼         ▼         ▼
+  Finnhub   yfinance  PostgreSQL  Gemini
+(US/global) (NSE/BSE)     DB     LLM API
 ```
 
 Two independent market-data providers are routed per-symbol by ticker
 suffix (`.NS` / `.BO` → yfinance, everything else → Finnhub), so the app
 genuinely tracks both US and Indian equities on their own market calendars,
 not a single US-only clock.
+
+### Global market state vs. user observation state
+
+This is the architectural principle the whole product rests on:
+
+```
+MARKET STATE IS GLOBAL.        (symbols, snapshots, events, news)
+OBSERVATION STATE IS PER-USER.  (last_observed_at, last_observed_snapshot_id)
+```
+
+Ingestion, change detection, and `MarketEvent` creation never know or care
+which user is looking — one poll of NVDA serves every user tracking it.
+`attention_service` is where the two meet: it reads a user's own
+`UserObservation.last_observed_snapshot_id` to compute **"since you
+checked"** (`since_checked_change_pct` in `AttentionItem`), which is
+distinct from `price_change_pct` (today's move vs. `previous_close` — real,
+useful market context, just not the same question). Two users who added
+NVDA at different times get different `since_checked_change_pct` values
+from the exact same underlying `MarketEvent` — nothing is duplicated
+per-user, only the baseline comparison is.
+
+### Event lifecycle
+
+A symbol sitting at HIGH for ten consecutive 45s polls does not create ten
+`MarketEvent` rows. `engine/scoring.classify_transition` compares each new
+score against the most recent prior event for that symbol and only creates
+a new one on a real transition — `NEW` (first ever), `ESCALATION` /
+`DEESCALATION` (crossed a level, or moved >0.10 within the same level), or
+silently skips a `CONTINUING` state. The transition kind is stored in the
+event's own `signals` JSONB for explanation context.
+
+### Provider resilience
+
+- **Retry**: each provider retries its own transient failures (timeout,
+  429, 5xx) with exponential backoff before giving up.
+- **Fallback**: if the primary provider still fails, non-Indian symbols
+  fall back to yfinance (it covers global tickers, no API key required) —
+  `ingestion_service.get_quote_with_fallback`. `.NS`/`.BO` symbols have no
+  fallback (yfinance is already the only real source for NSE/BSE).
+- **Conflict detection**: run once, at the point a new ticker is first
+  resolved (`watchlist_service._resolve_new_symbol`) rather than on every
+  poll — cross-checking both providers continuously would double the
+  ongoing call volume against the very free-tier ceiling the poll interval
+  is tuned around, for marginal benefit. A >2% disagreement between
+  providers at resolution time is logged as a real, exercised conflict path.
+- **Volume baseline semantics**: `MarketSnapshot.is_daily_bar` distinguishes
+  real daily OHLCV rows (from `bootstrap_historical`) from live-poll rows.
+  A "30-day average volume" is only computed from `is_daily_bar` rows when
+  there are enough of them (`ingestion_service._select_volume_baseline`) —
+  live polls can carry intraday-cumulative volume (yfinance) or no volume
+  at all (Finnhub's `/quote` doesn't return one), neither comparable to a
+  single day's figure on its own.
 
 ### Key Design Decisions
 
@@ -46,6 +112,8 @@ not a single US-only clock.
 | **Hallucination guard** | Rejects LLM responses with invented percentages before showing them to a user |
 | **Commit-after-render** | Baseline only advances after the user has actually seen the change; a crashed tab sees it again |
 | **Polling vs WebSockets** | Product is "return and see what changed," not a live trading ticker — polling matches that; tuned for a livelier feel without adding infrastructure |
+| **Batched attention queries** | A 50-symbol watchlist used to mean ~7N queries in `get_changes`; now a fixed handful regardless of N (grouped observation/event/snapshot/news lookups) |
+| **Timezone-aware DB timestamps everywhere** | A naive `datetime.utcnow()` default written to a `TIMESTAMPTZ` column gets silently reinterpreted as local time by this stack — confirmed by direct round-trip test, off by the local UTC offset. Every model default uses an aware `datetime.now(timezone.utc)` helper instead |
 
 ### Scoring Weight Calibration
 
@@ -60,6 +128,21 @@ not a single US-only clock.
 **Corroboration Boost**: 2 signals → +5%, 3 → +10%, 4+ → +15%
 
 **Attention Levels**: CRITICAL (≥0.70) · HIGH (≥0.40) · WATCH (≥0.15) · NO_CHANGE
+
+---
+
+## Demo Mode
+
+Live 5-minute demos shouldn't have to hope the market does something
+interesting at the right moment. **Settings → Demo Mode → "Run demo
+scenario"** (or `POST /api/admin/demo-scenario?watchlist_id=...`) seeds a
+deterministic "you were away for 4h12m" scenario — NVDA +7.8% on 3.2x
+volume with a news spike, TSLA -3.1% on 1.8x volume, MSFT +2.4%, plus two
+quiet stocks (AAPL, AMZN) for contrast — through the **real** ingestion →
+change-detection → scoring → explanation pipeline. Nothing is pre-baked:
+`run_change_detection` runs for real, Gemini generates real explanations
+for the seeded numbers. No external API calls are made, so it works fully
+offline and produces the identical result every time.
 
 ---
 
@@ -117,50 +200,63 @@ npm run dev
 
 ```
 backend/
-  app/
-    config.py              # Pydantic Settings (env vars)
-    database.py             # SQLAlchemy async engine
-    models.py                # ORM models
-    schemas.py                 # Pydantic request/response schemas
-    main.py                     # FastAPI app + lifespan (starts scheduler)
-    auth/
-      security.py            # bcrypt hashing, JWT issue/verify
-      dependencies.py        # get_current_user FastAPI dependency
-    engine/
-      signals.py             # 5 pure signal functions
-      scoring.py              # Weighted score + attention levels
-      market_calendar.py       # US (ET) + Indian (IST) market hours
-    providers/
-      base.py                 # Abstract provider interface
-      finnhub_provider.py      # US/global — quotes, candles, news, profile
-      yfinance_provider.py     # NSE/BSE — same interface, no API key needed
-    services/
-      ingestion_service.py    # Poll + change detection + provider routing
-      attention_service.py     # Core "what changed?" pipeline
-      explanation_service.py    # LLM + fallback + hallucination guard
-      observation_service.py    # Per-user baseline management
-      watchlist_service.py       # CRUD + live ticker resolution
-    routers/
-      auth.py, health.py, watchlists.py, dashboard.py
-    llm/
-      client.py, prompts.py, fallback.py
-    scheduler/jobs.py         # APScheduler — polls whenever either market is open
-  scripts/
-    schema.sql, seed.py, pull_live_data.py   # one-shot manual data pull
-  tests/
-    test_signals.py, test_scoring.py, test_fallback.py, conftest.py
+├── app/
+│   ├── config.py                    # Pydantic Settings (env vars)
+│   ├── database.py                  # SQLAlchemy async engine
+│   ├── models.py                    # ORM models (timezone-aware defaults)
+│   ├── schemas.py                   # Pydantic request/response schemas
+│   ├── main.py                      # FastAPI app + lifespan (starts scheduler)
+│   │
+│   ├── auth/
+│   │   ├── security.py              # bcrypt hashing, JWT issue/verify
+│   │   └── dependencies.py          # get_current_user FastAPI dependency
+│   │
+│   ├── engine/
+│   │   ├── signals.py               # 5 pure signal functions
+│   │   ├── scoring.py               # Weighted score + attention levels + event lifecycle
+│   │   └── market_calendar.py       # US (ET) + Indian (IST) market hours
+│   │
+│   ├── providers/
+│   │   ├── base.py                  # Abstract provider interface
+│   │   ├── finnhub_provider.py      # US/global — quotes, candles, news, profile
+│   │   └── yfinance_provider.py     # NSE/BSE — same interface, no API key needed
+│   │
+│   ├── services/
+│   │   ├── ingestion_service.py     # Poll + change detection + provider fallback
+│   │   ├── attention_service.py     # Core "what changed?" pipeline (batched queries)
+│   │   ├── explanation_service.py   # LLM + fallback + hallucination guard
+│   │   ├── observation_service.py   # Per-user baseline management
+│   │   ├── watchlist_service.py     # CRUD + live ticker resolution + conflict check
+│   │   └── demo_service.py          # Deterministic "you were away" scenario
+│   │
+│   ├── routers/
+│   │   └── auth.py, health.py, watchlists.py, dashboard.py
+│   │
+│   ├── llm/
+│   │   └── client.py, prompts.py, fallback.py
+│   │
+│   └── scheduler/
+│       └── jobs.py                  # APScheduler — polls whenever either market is open
+│
+├── scripts/
+│   └── schema.sql, seed.py, pull_live_data.py   # one-shot manual data pull
+│
+└── tests/
+    └── test_signals.py, test_scoring.py, test_fallback.py, test_ingestion.py, conftest.py
 
 frontend/
-  src/
-    app/
-      page.tsx                     # Dashboard (Overview)
-      login/, signup/               # Auth pages
-      watchlists/, settings/         # Watchlist management, profile/system status
-      stocks/[symbol]/page.tsx        # Stock detail + real price chart
-    components/                       # AttentionCard, MarketOverview, Sidebar, etc.
-    context/AuthContext.tsx            # Token + user state
-    hooks/                              # React Query hooks (useChanges, useQuotes, useCandles, ...)
-    lib/                                 # api.ts, types.ts, countries.ts, auth-storage.ts
+└── src/
+    ├── app/
+    │   ├── page.tsx                       # Dashboard (Overview)
+    │   ├── login/, signup/                # Auth pages
+    │   ├── watchlists/, settings/         # Watchlist management, profile, demo mode
+    │   └── stocks/[symbol]/page.tsx       # Stock detail + real price chart
+    │
+    ├── components/                        # AttentionCard, MarketOverview, Sidebar, etc.
+    ├── context/
+    │   └── AuthContext.tsx                # Token + user state
+    ├── hooks/                             # React Query hooks (useChanges, useQuotes, useCandles, ...)
+    └── lib/                               # api.ts, types.ts, countries.ts, auth-storage.ts
 ```
 
 ---
@@ -192,7 +288,24 @@ pytest -v
 | GET | `/api/stocks/{symbol}/candles?range=1D\|1W\|1M` | — | Historical price points for charts |
 | POST | `/api/observations/commit` | ✓ | Advance the user's "last checked" baseline |
 | GET | `/api/dashboard` | ✓ | Per-user summary stats + market hours |
-| POST | `/api/admin/trigger-poll` | — | Manually trigger a market data poll (demo utility) |
+| POST | `/api/admin/trigger-poll` | ✓ (+cooldown) | Manually trigger a market data poll — also the frontend's Refresh button |
+| POST | `/api/admin/demo-scenario` | ✓ | Seed the deterministic demo scenario (see Demo Mode) |
+
+---
+
+## Scaling reasoning
+
+The dimension that matters is **unique symbols tracked across all users**,
+not users × symbols: `poll_market_data` fetches each distinct symbol from
+the provider once per cycle regardless of how many users' watchlists
+contain it (10,000 users all tracking NVDA still means one Finnhub call for
+NVDA per poll). Per-user work — `attention_service.get_changes` — reads
+already-stored state and is now batched to a fixed handful of queries per
+request regardless of watchlist size (see Key Design Decisions). The actual
+scaling constraint is the market-data provider's own rate limit, not the
+database or the app tier; that's also why the poll interval and fallback
+strategy are the parts this app treats seriously rather than a caching layer
+that would just be hiding the real bottleneck.
 
 ---
 
@@ -204,3 +317,6 @@ Deliberate scope cuts, not oversights:
 - **No WebSocket push** — polling was the chosen tradeoff for this product shape (see Key Design Decisions).
 - **No password reset / email verification** — auth is real (bcrypt + JWT) but minimal.
 - **US-market candle backfill can be capped by Finnhub's free tier** — `/stock/candle` sometimes 403s on the free plan; live quotes are unaffected, and yfinance-backed Indian symbols aren't subject to this.
+- **Conflict detection runs at ticker-resolution time, not on every poll** — a deliberate cost/benefit call, not an oversight (see Provider resilience above); it's a real, exercised code path, just not continuous.
+- **No DB-fixture test infrastructure** — the existing suite is pure-function unit tests (signals, scoring, event lifecycle, hallucination guard, volume-baseline selection); N+1 batching, provider fallback, and the demo scenario are verified via live API calls rather than automated DB-backed tests.
+- **`CONFLICTING`/`INVALID` quality statuses exist in the schema but aren't wired into every ingestion path** — `INVALID` in particular (rejecting malformed provider data outright) isn't implemented; providers currently already reject on missing/non-positive price before ever constructing a `QuoteData`, which covers the common case but isn't the same as a first-class rejection path.
