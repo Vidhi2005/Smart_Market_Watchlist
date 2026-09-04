@@ -1,18 +1,24 @@
 "use client";
 
 import { useState } from "react";
-import { Loader2, Check, Globe2 } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { Loader2, Check, Globe2, PlayCircle } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { SystemStatusBadge } from "@/components/SystemStatusBadge";
 import { MarketStatusPill } from "@/components/MarketStatusPill";
 import { useAuth } from "@/context/AuthContext";
-import { useDashboard } from "@/hooks/useDashboard";
+import { useDashboard, useWatchlists } from "@/hooks/useDashboard";
 import { COUNTRIES } from "@/lib/countries";
+import { api } from "@/lib/api";
 
 function SettingsContent() {
+  const qc = useQueryClient();
   const { user, logout, updateProfile } = useAuth();
   const { data: dashboard } = useDashboard();
+  const { data: watchlists } = useWatchlists();
   const [displayName, setDisplayName] = useState(user?.display_name ?? "");
+  const [demoRunning, setDemoRunning] = useState(false);
+  const [demoResult, setDemoResult] = useState<string | null>(null);
   const currentCountry = COUNTRIES.find((c) => c.label === user?.country);
   const [countryCode, setCountryCode] = useState(currentCountry?.code ?? "IN");
   const [saving, setSaving] = useState(false);
@@ -40,6 +46,25 @@ function SettingsContent() {
       setError(err instanceof Error ? err.message : "Failed to save");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleRunDemo = async () => {
+    const watchlistId = watchlists?.[0]?.id;
+    if (!watchlistId) return;
+    setDemoRunning(true);
+    setDemoResult(null);
+    try {
+      const res = await api.runDemoScenario(watchlistId);
+      setDemoResult(`Seeded ${res.symbols.length} symbols as if you'd been away ${res.away_for_minutes} minutes.`);
+      qc.invalidateQueries({ queryKey: ["changes"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+      qc.invalidateQueries({ queryKey: ["quotes"] });
+      qc.invalidateQueries({ queryKey: ["watchlists"] });
+    } catch (err) {
+      setDemoResult(err instanceof Error ? err.message : "Demo scenario failed");
+    } finally {
+      setDemoRunning(false);
     }
   };
 
@@ -167,6 +192,30 @@ function SettingsContent() {
               </div>
             )}
           </div>
+        </div>
+
+        {/* Demo Mode */}
+        <div className="card">
+          <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>Demo Mode</h2>
+          <p style={{ fontSize: 12, color: "var(--clr-text-muted)", marginBottom: 14, lineHeight: 1.5 }}>
+            Seeds a deterministic &quot;you were away for 4h12m&quot; scenario (NVDA +7.8%, TSLA -3.1%,
+            MSFT +2.4%, plus two quiet stocks for contrast) through the real ingestion → scoring →
+            event pipeline — no external API calls, same result every time.
+          </p>
+          <button
+            className="btn btn-primary"
+            onClick={handleRunDemo}
+            disabled={demoRunning || !watchlists?.[0]?.id}
+            id="run-demo-btn"
+          >
+            {demoRunning ? <Loader2 size={14} className="spin" /> : <PlayCircle size={14} />}
+            {demoRunning ? "Seeding…" : "Run demo scenario"}
+          </button>
+          {demoResult && (
+            <div style={{ fontSize: 12, color: "var(--clr-text-muted)", marginTop: 10 }}>
+              {demoResult} Head to Overview to see it.
+            </div>
+          )}
         </div>
       </div>
     </>

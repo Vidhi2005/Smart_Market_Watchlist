@@ -17,7 +17,12 @@ interface AttentionCardProps {
 
 export function AttentionCard({ item, index }: AttentionCardProps) {
   const [expanded, setExpanded] = useState(false);
-  const isUp = (item.price_change_pct ?? 0) >= 0;
+  // "Since you checked" is the actual product promise — prefer it as the
+  // primary number. Falls back to today's move (vs previous_close) for a
+  // symbol with no prior baseline yet (e.g. just added).
+  const hasSinceChecked = item.since_checked_change_pct !== null;
+  const primaryPct = hasSinceChecked ? item.since_checked_change_pct! : (item.price_change_pct ?? 0);
+  const isUp = primaryPct >= 0;
   const level = item.attention_level;
   const handleSpotlight = useSpotlight();
 
@@ -83,22 +88,32 @@ export function AttentionCard({ item, index }: AttentionCardProps) {
 
       {/* ── Price row ── */}
       {item.current_price && (
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }} className="tabular-nums">
-          <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: "-0.03em" }}>
-            ${Number(item.current_price).toFixed(2)}
-          </div>
-          <div
-            className={isUp ? "positive" : "negative"}
-            style={{ display: "flex", alignItems: "center", gap: 4, fontWeight: 700, fontSize: 15 }}
-          >
-            {isUp ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
-            {isUp ? "+" : ""}{(item.price_change_pct ?? 0).toFixed(2)}%
-          </div>
-          {item.volume && (
-            <div style={{ color: "var(--clr-text-muted)", fontSize: 12, marginLeft: "auto" }}>
-              Vol: {formatVolume(item.volume)}
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }} className="tabular-nums">
+            <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: "-0.03em" }}>
+              ${Number(item.current_price).toFixed(2)}
             </div>
-          )}
+            <div
+              className={isUp ? "positive" : "negative"}
+              style={{ display: "flex", alignItems: "center", gap: 4, fontWeight: 700, fontSize: 15 }}
+              title={hasSinceChecked ? "Move since you last checked this stock" : "Today's move vs previous close"}
+            >
+              {isUp ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
+              {isUp ? "+" : ""}{primaryPct.toFixed(2)}%
+            </div>
+            {item.volume && (
+              <div style={{ color: "var(--clr-text-muted)", fontSize: 12, marginLeft: "auto" }}>
+                Vol: {formatVolume(item.volume)}
+              </div>
+            )}
+          </div>
+          <div style={{ fontSize: 11, color: "var(--clr-text-faint)", marginTop: 3 }}>
+            {hasSinceChecked ? (
+              <>Since you checked · Today {(item.price_change_pct ?? 0) >= 0 ? "+" : ""}{(item.price_change_pct ?? 0).toFixed(2)}%</>
+            ) : (
+              "Today's move — no prior baseline yet"
+            )}
+          </div>
         </div>
       )}
 

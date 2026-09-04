@@ -127,4 +127,10 @@ export const api = {
 
   // Admin
   triggerPoll: () => apiFetch("/api/admin/trigger-poll", { method: "POST" }),
+
+  runDemoScenario: (watchlistId: string) =>
+    apiFetch<{ scenario: string; away_for_minutes: number; symbols: string[] }>(
+      `/api/admin/demo-scenario?watchlist_id=${encodeURIComponent(watchlistId)}`,
+      { method: "POST" }
+    ),
 };

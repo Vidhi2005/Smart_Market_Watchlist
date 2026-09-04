@@ -34,7 +34,8 @@ export interface AttentionItem {
   event_type: string;
   magnitude: number | null;
   current_price: string | null;
-  price_change_pct: number | null;
+  price_change_pct: number | null;           // vs previous_close ("today's move")
+  since_checked_change_pct: number | null;    // vs the user's own baseline
   volume: number | null;
   avg_volume_30d: number | null;
   benchmark_change_pct: number | null;
