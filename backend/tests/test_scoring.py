@@ -7,10 +7,12 @@ from app.engine.scoring import (
     RawSignals,
     ScoredResult,
     _count_active_signals,
+    classify_transition,
     compute_confidence,
     compute_raw_score,
     corroboration_boost,
     score,
+    should_create_event,
 )
 
 
@@ -105,3 +107,33 @@ class TestComputeConfidence:
         s = RawSignals()
         c = compute_confidence(s, data_is_fresh=True)
         assert c <= 0.5
+
+
+class TestEventLifecycle:
+    """A symbol sitting at HIGH for ten consecutive polls should not create
+    ten near-identical MarketEvent rows — only real transitions should."""
+
+    def test_first_ever_event_is_new(self):
+        assert classify_transition(None, None, "WATCH", 0.2) == "NEW"
+        assert should_create_event(None, None, "WATCH", 0.2) is True
+
+    def test_same_level_similar_score_is_continuing(self):
+        assert classify_transition("HIGH", 0.50, "HIGH", 0.52) == "CONTINUING"
+        assert should_create_event("HIGH", 0.50, "HIGH", 0.52) is False
+
+    def test_level_escalation_creates_event(self):
+        assert classify_transition("WATCH", 0.20, "HIGH", 0.45) == "ESCALATION"
+        assert should_create_event("WATCH", 0.20, "HIGH", 0.45) is True
+
+    def test_level_deescalation_creates_event(self):
+        assert classify_transition("CRITICAL", 0.80, "HIGH", 0.50) == "DEESCALATION"
+        assert should_create_event("CRITICAL", 0.80, "HIGH", 0.50) is True
+
+    def test_same_level_but_meaningfully_worse_score_escalates(self):
+        # Still HIGH, but the score moved a lot within the level — a stock
+        # going from barely-HIGH to almost-CRITICAL is worth re-surfacing.
+        assert classify_transition("HIGH", 0.41, "HIGH", 0.68) == "ESCALATION"
+        assert should_create_event("HIGH", 0.41, "HIGH", 0.68) is True
+
+    def test_same_level_small_score_drift_is_continuing(self):
+        assert should_create_event("WATCH", 0.15, "WATCH", 0.18) is False

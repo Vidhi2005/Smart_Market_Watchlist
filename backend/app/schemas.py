@@ -141,7 +141,8 @@ class AttentionItem(BaseModel):
     event_type: str
     magnitude: Optional[float]
     current_price: Optional[Decimal]
-    price_change_pct: Optional[float]
+    price_change_pct: Optional[float]           # vs previous_close ("today's move")
+    since_checked_change_pct: Optional[float] = None  # vs the user's own baseline
     volume: Optional[int]
     avg_volume_30d: Optional[float] = None
     benchmark_change_pct: Optional[float] = None

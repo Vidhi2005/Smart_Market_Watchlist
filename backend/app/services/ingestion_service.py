@@ -15,9 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import AsyncSessionLocal
 from app.engine import signals as sig
-from app.engine.scoring import RawSignals, score
+from app.engine.scoring import RawSignals, classify_transition, score, should_create_event
 from app.models import MarketEvent, MarketSnapshot, Symbol, UserObservation
-from app.providers.base import MarketDataProvider
+from app.providers.base import MarketDataProvider, QuoteData
 from app.providers.finnhub_provider import FinnhubProvider
 from app.providers.yfinance_provider import YFinanceProvider
 
@@ -49,21 +49,70 @@ def get_provider(symbol: str = "") -> MarketDataProvider:
         return _finnhub_provider
 
 
+def _fallback_provider(symbol: str) -> MarketDataProvider | None:
+    """The secondary provider to try if the primary fails, or None if there
+    isn't a sensible one. Indian symbols already use the only provider that
+    covers NSE/BSE, so there's no fallback for them — yfinance, unlike
+    Finnhub, has no API key requirement and covers global tickers, so it
+    doubles as a free fallback for everything else."""
+    global _yfinance_provider
+    if symbol.upper().endswith(_INDIAN_SUFFIXES):
+        return None
+    if _yfinance_provider is None:
+        _yfinance_provider = YFinanceProvider()
+    return _yfinance_provider
+
+
+async def get_quote_with_fallback(symbol: str) -> tuple[QuoteData | None, bool]:
+    """
+    Fetches a quote via the primary provider, falling back to a secondary
+    provider on failure. Returns (quote, used_fallback).
+    """
+    primary = get_provider(symbol)
+    quote = await primary.get_quote(symbol)
+    if quote:
+        return quote, False
+
+    fallback = _fallback_provider(symbol)
+    if not fallback:
+        return None, False
+
+    logger.warning("Primary provider failed for %s — trying fallback", symbol)
+    quote = await fallback.get_quote(symbol)
+    return quote, quote is not None
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+def _select_volume_baseline(rows: list[tuple[int, bool]]) -> float:
+    """
+    Pure selection logic, unit-testable without a DB: prefer real daily-bar
+    volumes when there are enough of them to be a meaningful baseline (>=3),
+    since only those are actually comparable to a single day's volume.
+    Falls back to whatever's available otherwise rather than returning
+    nothing, but that fallback may mix live-poll readings that aren't a
+    clean daily figure (documented approximation, not silently pretended
+    away).
+    """
+    daily = [v for v, is_daily in rows if is_daily and v]
+    if len(daily) >= 3:
+        return sum(daily) / len(daily)
+    all_vols = [v for v, _ in rows if v]
+    return sum(all_vols) / len(all_vols) if all_vols else 0.0
+
+
 async def _get_avg_volume(db: AsyncSession, symbol_id: str, days: int = 30) -> float:
-    """Average daily volume from stored snapshots over the last N days."""
+    """Average daily volume baseline from stored snapshots over the last N days."""
     cutoff = datetime.now(tz=timezone.utc) - timedelta(days=days)
     result = await db.execute(
-        select(MarketSnapshot.volume)
+        select(MarketSnapshot.volume, MarketSnapshot.is_daily_bar)
         .where(
             MarketSnapshot.symbol_id == symbol_id,
             MarketSnapshot.ingested_at >= cutoff,
             MarketSnapshot.volume.isnot(None),
         )
     )
-    volumes = [r for r in result.scalars().all() if r]
-    return sum(volumes) / len(volumes) if volumes else 0.0
+    return _select_volume_baseline(list(result.all()))
 
 
 async def _get_price_range_30d(
@@ -150,6 +199,25 @@ async def run_change_detection(
     if result.attention_level == "NO_CHANGE":
         return None
 
+    # Event dedup: don't mint a new MarketEvent every single poll a symbol
+    # stays above threshold — only on a real transition (new/escalation/
+    # de-escalation) or a meaningful score move within the same level.
+    prev_result = await db.execute(
+        select(MarketEvent)
+        .where(MarketEvent.symbol_id == symbol.id)
+        .order_by(MarketEvent.detected_at.desc())
+        .limit(1)
+    )
+    prev_event = prev_result.scalar_one_or_none()
+    prev_level = prev_event.signals.get("attention_level") if prev_event else None
+    prev_score = prev_event.signals.get("final_score") if prev_event else None
+
+    if not should_create_event(prev_level, prev_score, result.attention_level, result.final_score):
+        logger.debug("%s still %s — no new event (continuing state)", symbol.symbol, result.attention_level)
+        return None
+
+    transition = classify_transition(prev_level, prev_score, result.attention_level, result.final_score)
+
     # Build signals JSONB payload
     signals_payload = {
         "price_move":          round(signals.price_move, 4),
@@ -164,6 +232,7 @@ async def run_change_detection(
         "attention_level":     result.attention_level,
         "stock_pct_change":    round(stock_pct, 4),
         "bench_pct_change":    round(bench_pct, 4),
+        "transition":          transition,
     }
 
     event = MarketEvent(
@@ -202,8 +271,9 @@ async def poll_market_data() -> None:
 
         for symbol in symbols:
             try:
-                provider = get_provider(symbol.symbol)
-                quote = await provider.get_quote(symbol.symbol)
+                quote, used_fallback = await get_quote_with_fallback(symbol.symbol)
+                if used_fallback:
+                    logger.info("Used fallback provider for %s", symbol.symbol)
                 if not quote:
                     # Mark last snapshot STALE
                     last = await db.execute(
@@ -274,6 +344,7 @@ async def bootstrap_historical(symbol_id: str, ticker: str) -> None:
                 provider_timestamp=candle.timestamp,
                 ingested_at=candle.timestamp,
                 quality_status="FRESH",
+                is_daily_bar=True,
             )
             db.add(snap)
         await db.commit()

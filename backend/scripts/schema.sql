@@ -62,9 +62,13 @@ CREATE TABLE IF NOT EXISTS market_snapshots (
     source             VARCHAR(50)  NOT NULL DEFAULT 'finnhub',
     provider_timestamp TIMESTAMPTZ,
     ingested_at        TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    quality_status     VARCHAR(20)  NOT NULL DEFAULT 'FRESH'  -- FRESH | STALE
+    quality_status     VARCHAR(20)  NOT NULL DEFAULT 'FRESH'  -- FRESH | STALE | CONFLICTING | INVALID
 );
 CREATE INDEX IF NOT EXISTS idx_snapshots_symbol_time ON market_snapshots(symbol_id, ingested_at DESC);
+-- Migration: distinguishes real daily OHLCV bars (bootstrap) from live-poll
+-- rows, so a "30-day average volume" is computed from actually-comparable
+-- daily figures instead of mixing in intraday/absent volume readings.
+ALTER TABLE market_snapshots ADD COLUMN IF NOT EXISTS is_daily_bar BOOLEAN NOT NULL DEFAULT false;
 
 -- ── news_events ───────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS news_events (

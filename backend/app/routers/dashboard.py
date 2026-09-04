@@ -186,12 +186,51 @@ async def dashboard(
 
 
 # ── Admin: manual trigger ─────────────────────────────────────────────────────
+# Unauthenticated + unthrottled, this endpoint lets anyone on the internet
+# force real calls against the shared Finnhub free-tier quota. Auth turns
+# "anyone" into "a real account"; the cooldown stops even a real account
+# from hammering it (this is also the frontend's "Refresh" button).
+
+_last_trigger_at: datetime | None = None
+_TRIGGER_COOLDOWN_SECONDS = 30
+
 
 @router.post("/admin/trigger-poll")
-async def trigger_poll():
+async def trigger_poll(current_user: User = Depends(get_current_user)):
     """Manually trigger a market data poll (for demos)."""
+    global _last_trigger_at
     import asyncio
+
+    now = datetime.now(tz=timezone.utc)
+    if _last_trigger_at and (now - _last_trigger_at).total_seconds() < _TRIGGER_COOLDOWN_SECONDS:
+        raise HTTPException(
+            status_code=429,
+            detail="Poll was triggered recently — try again in a few seconds.",
+        )
+    _last_trigger_at = now
+
     from app.services.ingestion_service import poll_market_data, poll_news
     asyncio.create_task(poll_market_data())
     asyncio.create_task(poll_news())
     return {"status": "poll triggered"}
+
+
+@router.post("/admin/demo-scenario")
+async def demo_scenario(
+    watchlist_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Seeds a deterministic "you were away for 4h12m" scenario through the
+    real ingestion -> change-detection -> scoring pipeline, for reliable
+    live demos that don't depend on the market doing something interesting
+    at the right moment (or on any external API being reachable at all).
+    """
+    wl = await watchlist_service.get_watchlist(db, watchlist_id, current_user.id)
+    if not wl:
+        raise HTTPException(status_code=404, detail="Watchlist not found")
+
+    from app.services.demo_service import run_demo_scenario
+    result = await run_demo_scenario(db, current_user.id, watchlist_id)
+    return result

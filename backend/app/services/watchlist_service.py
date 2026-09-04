@@ -3,12 +3,21 @@ Watchlist service — all business logic for watchlist CRUD.
 """
 from __future__ import annotations
 
+import logging
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models import Symbol, Watchlist, WatchlistItem
 from app.schemas import WatchlistCreate
+
+logger = logging.getLogger(__name__)
+
+# Two providers disagreeing by more than this on the same instrument is
+# treated as a data-quality conflict worth logging, not just normal price
+# noise between two slightly-offset reads.
+_CONFLICT_TOLERANCE_PCT = 2.0
 
 
 async def get_user_watchlists(db: AsyncSession, user_id: str) -> list[Watchlist]:
@@ -63,12 +72,33 @@ async def _resolve_new_symbol(db: AsyncSession, ticker: str) -> Symbol | None:
     the ticker exists; the resolved row is persisted so future searches (and
     other users) find it locally without another live lookup.
     """
-    from app.services.ingestion_service import get_provider
+    from app.services.ingestion_service import _INDIAN_SUFFIXES, get_provider
 
     provider = get_provider(ticker)
     quote = await provider.get_quote(ticker)
     if not quote:
         return None  # not a real/quotable ticker
+
+    # Real (if narrowly-scoped) conflict detection: this is the one place a
+    # symbol gets freshly resolved, so it's a cheap, low-frequency point to
+    # cross-check a second provider — unlike doing this on every poll, which
+    # would double the ongoing API cost for continuous coverage that isn't
+    # needed here. yfinance covers non-Indian tickers too, so it doubles as
+    # a free secondary source purely for this one-time check.
+    if not ticker.upper().endswith(_INDIAN_SUFFIXES):
+        from app.providers.yfinance_provider import YFinanceProvider
+
+        secondary_quote = await YFinanceProvider().get_quote(ticker)
+        if secondary_quote:
+            primary_price = float(quote.price)
+            secondary_price = float(secondary_quote.price)
+            if primary_price > 0:
+                diff_pct = abs(primary_price - secondary_price) / primary_price * 100
+                if diff_pct > _CONFLICT_TOLERANCE_PCT:
+                    logger.warning(
+                        "Provider conflict resolving %s: %s=%.2f vs yfinance=%.2f (%.1f%% apart)",
+                        ticker, quote.source, primary_price, secondary_price, diff_pct,
+                    )
 
     company_name = await provider.get_company_name(ticker)
     exchange = "NSE" if ticker.endswith(".NS") else "BSE" if ticker.endswith(".BO") else None
@@ -125,6 +155,14 @@ async def add_symbol_to_watchlist(
 
     item = WatchlistItem(watchlist_id=watchlist_id, symbol_id=sym.id)
     db.add(item)
+    await db.flush()
+
+    # Give the symbol a real baseline immediately instead of leaving it to
+    # attention_service's "no observation yet" fallback (previously-dead
+    # code — this was defined but never called).
+    from app.services.observation_service import initialize_observation
+    await initialize_observation(db, user_id, sym.id)
+
     await db.commit()
     await db.refresh(item)
 

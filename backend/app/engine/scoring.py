@@ -102,3 +102,44 @@ def score(signals: RawSignals, data_is_fresh: bool = True) -> ScoredResult:
         attention_level=level,
         signals=signals,
     )
+
+
+# ── Event lifecycle ─────────────────────────────────────────────────────────
+# Without this, a symbol sitting at HIGH for ten consecutive polls creates
+# ten near-identical MarketEvent rows. A poll cycle should only mint a new
+# event when the situation actually changed, not on every re-confirmation.
+
+_SCORE_DELTA_THRESHOLD = 0.10  # meaningful move within the same level
+
+
+def classify_transition(
+    prev_level: str | None,
+    prev_score: float | None,
+    new_level: str,
+    new_score: float,
+) -> str:
+    """Returns NEW | ESCALATION | DEESCALATION | CONTINUING."""
+    if prev_level is None:
+        return "NEW"
+    if new_level != prev_level:
+        levels = ["NO_CHANGE", "WATCH", "HIGH", "CRITICAL"]
+        prev_idx = levels.index(prev_level) if prev_level in levels else 0
+        new_idx = levels.index(new_level) if new_level in levels else 0
+        return "ESCALATION" if new_idx > prev_idx else "DEESCALATION"
+    if prev_score is not None and abs(new_score - prev_score) >= _SCORE_DELTA_THRESHOLD:
+        return "ESCALATION" if new_score > prev_score else "DEESCALATION"
+    return "CONTINUING"
+
+
+def should_create_event(
+    prev_level: str | None,
+    prev_score: float | None,
+    new_level: str,
+    new_score: float,
+) -> bool:
+    """
+    Whether a poll result is meaningfully different enough from the prior
+    event for this symbol to warrant a new MarketEvent row, rather than
+    being the same continuing state re-confirmed.
+    """
+    return classify_transition(prev_level, prev_score, new_level, new_score) != "CONTINUING"
