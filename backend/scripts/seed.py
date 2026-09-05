@@ -96,19 +96,20 @@ async def main() -> None:
             )
         print(f"[OK] {len(SYMBOLS)} symbols seeded.")
 
-        # Create default watchlist for demo user (idempotent via name+user)
+        # Create a default watchlist for the demo user — genuinely idempotent
+        # via a check-then-insert, since `watchlists` has no unique
+        # constraint on (user_id, name) for an ON CONFLICT clause to target.
+        # (A prior version here claimed "idempotent via name+user" while
+        # actually just inserting unconditionally every time — verified by
+        # finding 6 duplicate "My Watchlist" rows for the demo user after
+        # re-running this script across a session's worth of migrations.)
         wl_id = await conn.fetchval(
-            """
-            INSERT INTO watchlists (user_id, name)
-            VALUES ($1, 'My Watchlist')
-            ON CONFLICT DO NOTHING
-            RETURNING id
-            """,
+            "SELECT id FROM watchlists WHERE user_id = $1 ORDER BY created_at LIMIT 1",
             DEMO_USER_ID,
         )
         if wl_id is None:
             wl_id = await conn.fetchval(
-                "SELECT id FROM watchlists WHERE user_id = $1 LIMIT 1",
+                "INSERT INTO watchlists (user_id, name) VALUES ($1, 'My Watchlist') RETURNING id",
                 DEMO_USER_ID,
             )
         print(f"[OK] Default watchlist: {wl_id}")

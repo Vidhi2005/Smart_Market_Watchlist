@@ -16,10 +16,7 @@ from app.models import (
     MarketEvent,
     MarketSnapshot,
     User,
-    UserAttention,
     UserObservation,
-    Watchlist,
-    WatchlistItem,
 )
 from app.schemas import (
     ChangesResponse,
@@ -115,44 +112,51 @@ async def dashboard(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # Every count below is scoped to the current user's own watchlist(s) —
-    # this endpoint used to run unscoped across the whole DB, which was a
-    # cross-user data leak now that multiple real accounts exist.
-    user_symbol_ids_subq = (
-        select(WatchlistItem.symbol_id)
-        .join(Watchlist, Watchlist.id == WatchlistItem.watchlist_id)
-        .where(Watchlist.user_id == current_user.id)
-        .distinct()
-    )
+    # Scoped to the user's primary (first-created) watchlist — the only one
+    # the UI actually surfaces (see README's Known Limitations: multiple
+    # watchlists are supported by the schema but deliberately not exposed).
+    # This used to aggregate across every watchlist the user owns, which
+    # silently diverges the moment a user has more than one — as this dev
+    # database demonstrated: a seed-script idempotency bug (fixed alongside
+    # this) had left 6 duplicate "My Watchlist" rows for the demo account,
+    # each independently holding the same symbols, so summing across all of
+    # them inflated the header's attention counts to 4-5x what /changes
+    # (correctly scoped to just the one visible watchlist) actually showed.
+    user_watchlists = await watchlist_service.get_user_watchlists(db, current_user.id)
+    primary_wl = user_watchlists[0] if user_watchlists else None
+    symbol_ids = [item.symbol_id for item in primary_wl.items] if primary_wl else []
 
-    total_result = await db.execute(
-        select(func.count()).select_from(user_symbol_ids_subq.subquery())
-    )
-    total_symbols = total_result.scalar() or 0
+    total_symbols = len(symbol_ids)
 
-    # Symbols with at least one event in the last 24h
     from datetime import timedelta
     cutoff = datetime.now(tz=timezone.utc) - timedelta(hours=24)
-    evented_result = await db.execute(
-        select(func.count(func.distinct(MarketEvent.symbol_id)))
-        .where(
-            MarketEvent.detected_at >= cutoff,
-            MarketEvent.symbol_id.in_(user_symbol_ids_subq),
+    symbols_with_events = 0
+    if symbol_ids:
+        evented_result = await db.execute(
+            select(func.count(func.distinct(MarketEvent.symbol_id)))
+            .where(MarketEvent.detected_at >= cutoff, MarketEvent.symbol_id.in_(symbol_ids))
         )
-    )
-    symbols_with_events = evented_result.scalar() or 0
+        symbols_with_events = evented_result.scalar() or 0
 
-    # Attention level counts — scoped to this user's own UserAttention rows
-    def count_level(level: str):
-        return select(func.count(UserAttention.id)).where(
-            UserAttention.user_id == current_user.id,
-            UserAttention.attention_level == level,
-            UserAttention.computed_at >= cutoff,
-        )
-
-    crit_res = await db.execute(count_level("CRITICAL"))
-    high_res = await db.execute(count_level("HIGH"))
-    watch_res = await db.execute(count_level("WATCH"))
+    # Attention level counts — MUST reflect the same "still pending since
+    # your baseline" semantics as /changes, not a blind rolling time window.
+    # A naive `UserAttention.computed_at >= cutoff` count (the previous
+    # approach) keeps counting an item as CRITICAL for a full 24h after its
+    # explanation was first generated, even after the user has committed
+    # their observation past that event — producing a header badge that
+    # visibly contradicts "all caught up" right below it. Deriving from the
+    # actual get_changes() output guarantees the two can never disagree,
+    # because they're counting the same thing.
+    critical_count = high_count = watch_count = 0
+    if primary_wl:
+        changes = await attention_service.get_changes(db, primary_wl.id, current_user.id)
+        for item in changes.items:
+            if item.attention_level == "CRITICAL":
+                critical_count += 1
+            elif item.attention_level == "HIGH":
+                high_count += 1
+            elif item.attention_level == "WATCH":
+                watch_count += 1
 
     # Last poll time (system-wide data-freshness fact, not user-specific)
     last_snap = await db.execute(
@@ -160,13 +164,16 @@ async def dashboard(
     )
     last_poll = last_snap.scalar()
 
-    # Last time this user actually looked at their watchlist
-    last_checked_result = await db.execute(
-        select(func.max(UserObservation.last_observed_at)).where(
-            UserObservation.user_id == current_user.id
+    # Last time this user actually looked at their (primary) watchlist
+    last_checked = None
+    if symbol_ids:
+        last_checked_result = await db.execute(
+            select(func.max(UserObservation.last_observed_at)).where(
+                UserObservation.user_id == current_user.id,
+                UserObservation.symbol_id.in_(symbol_ids),
+            )
         )
-    )
-    last_checked = last_checked_result.scalar()
+        last_checked = last_checked_result.scalar()
 
     us_open = is_market_open()
     ind_open = is_indian_market_open()
@@ -174,9 +181,9 @@ async def dashboard(
     return DashboardSummary(
         total_symbols_tracked=total_symbols,
         symbols_with_events=symbols_with_events,
-        critical_count=crit_res.scalar() or 0,
-        high_count=high_res.scalar() or 0,
-        watch_count=watch_res.scalar() or 0,
+        critical_count=critical_count,
+        high_count=high_count,
+        watch_count=watch_count,
         last_poll_at=last_poll,
         last_checked_at=last_checked,
         market_open=us_open or ind_open,
