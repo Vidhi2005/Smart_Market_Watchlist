@@ -361,21 +361,6 @@ a:focus-visible, button:focus-visible, input:focus-visible {
 
 .app-content-layer { position: relative; z-index: 1; }
 
-/* ── Live Market Ticker Tape (Clean Light Strip) ─────────────────────────────── */
-.ticker-track {
-  display: flex;
-  width: max-content;
-  animation: ticker-scroll 45s linear infinite;
-}
-.ticker-track:hover {
-  animation-play-state: paused;
-}
-
-@keyframes ticker-scroll {
-  0%   { transform: translateX(0); }
-  100% { transform: translateX(-50%); }
-}
-
 /* ── Auth split layout (clean light fintech) ─────────────────────────────────── */
 .auth-bg {
   position: relative;
