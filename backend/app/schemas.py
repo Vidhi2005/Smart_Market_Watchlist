@@ -131,6 +131,7 @@ class SignalBreakdown(BaseModel):
 class AttentionItem(BaseModel):
     """One attention card — what the user sees on the dashboard."""
     symbol: str
+    symbol_id: str
     company_name: str
     sector: Optional[str]
     attention_level: str           # CRITICAL | HIGH | WATCH

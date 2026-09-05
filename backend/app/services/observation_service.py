@@ -6,7 +6,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import MarketSnapshot, Symbol, UserObservation, Watchlist, WatchlistItem
@@ -68,14 +68,36 @@ async def commit_observations(
     a fixed handful of queries regardless of watchlist size, and each
     UserObservation upsert is idempotent (safe to call twice with the same
     data, e.g. a retried request after a dropped connection).
+
+    Also cleans up demo state: any symbol among these that the demo
+    scenario itself added (WatchlistItem.is_demo) is removed from the
+    watchlist entirely instead of getting a baseline update — reviewing a
+    demo alert and undoing the demo's temporary addition to the real
+    watchlist are the same action, so demo symbols never linger in a
+    user's real watchlist past the point they've actually been seen. A
+    symbol the user already tracked keeps is_demo=False and is untouched.
     """
-    q = select(WatchlistItem.symbol_id).where(WatchlistItem.watchlist_id == watchlist_id)
+    q = select(WatchlistItem.symbol_id, WatchlistItem.is_demo).where(WatchlistItem.watchlist_id == watchlist_id)
     if symbol_ids:
         q = q.where(WatchlistItem.symbol_id.in_(symbol_ids))
     result = await db.execute(q)
-    sym_ids = [r[0] for r in result.all()]
+    rows = result.all()
+    demo_sym_ids = [sid for sid, is_demo in rows if is_demo]
+    sym_ids = [sid for sid, is_demo in rows if not is_demo]
+
+    if demo_sym_ids:
+        await db.execute(delete(UserObservation).where(
+            UserObservation.user_id == user_id,
+            UserObservation.symbol_id.in_(demo_sym_ids),
+        ))
+        await db.execute(delete(WatchlistItem).where(
+            WatchlistItem.watchlist_id == watchlist_id,
+            WatchlistItem.symbol_id.in_(demo_sym_ids),
+        ))
+
     if not sym_ids:
-        return 0
+        await db.commit()
+        return len(demo_sym_ids)
 
     latest_snap_result = await db.execute(
         select(MarketSnapshot)
@@ -111,4 +133,4 @@ async def commit_observations(
         updated += 1
 
     await db.commit()
-    return updated
+    return updated + len(demo_sym_ids)

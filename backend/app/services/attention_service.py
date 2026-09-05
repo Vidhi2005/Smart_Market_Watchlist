@@ -159,6 +159,7 @@ async def get_changes(
         items.append(
             AttentionItem(
                 symbol=symbol.symbol,
+                symbol_id=str(symbol.id),
                 company_name=symbol.company_name,
                 sector=symbol.sector,
                 attention_level=attention_level,

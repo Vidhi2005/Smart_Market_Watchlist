@@ -104,10 +104,10 @@ export const api = {
     }),
 
   // Observations
-  commitObservations: (watchlistId: string) =>
+  commitObservations: (watchlistId: string, symbolIds?: string[]) =>
     apiFetch("/api/observations/commit", {
       method: "POST",
-      body: JSON.stringify({ watchlist_id: watchlistId }),
+      body: JSON.stringify({ watchlist_id: watchlistId, symbol_ids: symbolIds ?? null }),
     }),
 
   // Stocks

@@ -24,12 +24,20 @@ export function useChanges(watchlistId: string | null, marketOpen: boolean = tru
   });
 }
 
+// symbolIds omitted (or undefined) commits the whole watchlist; passing
+// one or more symbol ids scopes the commit to just those symbols — see
+// observation_service.commit_observations on the backend.
 export function useCommitObservations(watchlistId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => api.commitObservations(watchlistId),
+    mutationFn: (symbolIds?: string[]) => api.commitObservations(watchlistId, symbolIds),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["changes", watchlistId] });
+      // The header's critical-count badge reads from ["dashboard"], which
+      // polls independently (every 20s) — without this it can show a
+      // stale count for up to 20s after a review here.
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+      qc.invalidateQueries({ queryKey: ["watchlists"] });
     },
   });
 }

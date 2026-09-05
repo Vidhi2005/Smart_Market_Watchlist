@@ -63,7 +63,10 @@ async def run_demo_scenario(db: AsyncSession, user_id: str, watchlist_id: str) -
             )
         )
         if not existing_item.scalar_one_or_none():
-            db.add(WatchlistItem(watchlist_id=watchlist_id, symbol_id=symbol.id))
+            # is_demo=True only here — a symbol the user already tracked
+            # keeps is_demo=False even though the demo also touches its
+            # snapshot/event data, so real holdings are never auto-removed.
+            db.add(WatchlistItem(watchlist_id=watchlist_id, symbol_id=symbol.id, is_demo=True))
             await db.flush()
 
         # 30 days of consistent daily-bar history so volume/breakout signals

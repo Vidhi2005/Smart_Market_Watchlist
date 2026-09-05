@@ -24,6 +24,7 @@ export interface SignalBreakdown {
 
 export interface AttentionItem {
   symbol: string;
+  symbol_id: string;
   company_name: string;
   sector: string | null;
   attention_level: AttentionLevel;

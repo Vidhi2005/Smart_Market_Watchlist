@@ -7,16 +7,23 @@ import type { AttentionItem } from "@/lib/types";
 import { SignalBreakdownBars, SignalChips } from "./SignalBreakdown";
 import { FreshnessIndicator } from "./FreshnessIndicator";
 import { Sparkline } from "./Sparkline";
-import { TrendingUp, TrendingDown, Newspaper, ChevronDown, Info, ExternalLink } from "lucide-react";
+import { TrendingUp, TrendingDown, Newspaper, ChevronDown, Info, ExternalLink, Check } from "lucide-react";
 import { useSpotlight } from "@/hooks/useSpotlight";
 
 interface AttentionCardProps {
   item: AttentionItem;
   index: number;
+  onMarkReviewed?: (symbolId: string) => void;
+  isMarking?: boolean;
 }
 
-export function AttentionCard({ item, index }: AttentionCardProps) {
+export function AttentionCard({ item, index, onMarkReviewed, isMarking }: AttentionCardProps) {
   const [expanded, setExpanded] = useState(false);
+  // Purely a local acknowledgment that the click landed — not a claim
+  // that the card has been removed. The card only actually disappears
+  // once the changes query is refetched and the backend no longer
+  // returns this symbol (see page.tsx's onMarkReviewed / commit flow).
+  const [justReviewed, setJustReviewed] = useState(false);
   // "Since you checked" is the actual product promise — prefer it as the
   // primary number. Falls back to today's move (vs previous_close) for a
   // symbol with no prior baseline yet (e.g. just added).
@@ -30,7 +37,8 @@ export function AttentionCard({ item, index }: AttentionCardProps) {
     <motion.div
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.35, delay: Math.min(index, 6) * 0.06 }}
+      exit={{ opacity: 0, y: -8 }}
+      transition={{ duration: 0.25, delay: Math.min(index, 6) * 0.06 }}
       whileHover={{ y: -2 }}
       onMouseMove={handleSpotlight}
       className={`card spotlight attention-card-${level}`}
@@ -161,28 +169,57 @@ export function AttentionCard({ item, index }: AttentionCardProps) {
       {/* ── Real intraday sparkline ── */}
       <Sparkline symbol={item.symbol} isUp={isUp} />
 
-      {/* ── Expandable detail ── */}
-      <button
-        onClick={() => setExpanded((v) => !v)}
-        id={`more-detail-${item.symbol}`}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          background: "none",
-          border: "none",
-          cursor: "pointer",
-          fontSize: 12,
-          fontWeight: 600,
-          color: "var(--clr-text-muted)",
-          padding: 0,
-          fontFamily: "inherit",
-          justifySelf: "start",
-        }}
-      >
-        <ChevronDown size={14} style={{ transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
-        {expanded ? "Hide detail" : "More detail"}
-      </button>
+      {/* ── Expandable detail + review action ── */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          id={`more-detail-${item.symbol}`}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            fontSize: 12,
+            fontWeight: 600,
+            color: "var(--clr-text-muted)",
+            padding: 0,
+            fontFamily: "inherit",
+          }}
+        >
+          <ChevronDown size={14} style={{ transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
+          {expanded ? "Hide detail" : "More detail"}
+        </button>
+
+        {onMarkReviewed && (
+          <button
+            onClick={() => {
+              setJustReviewed(true);
+              onMarkReviewed(item.symbol_id);
+            }}
+            disabled={justReviewed || isMarking}
+            id={`mark-reviewed-${item.symbol}`}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 5,
+              background: "none",
+              border: "none",
+              cursor: justReviewed ? "default" : "pointer",
+              fontSize: 11,
+              fontWeight: 600,
+              color: "var(--clr-text-faint)",
+              padding: 0,
+              fontFamily: "inherit",
+              opacity: justReviewed ? 0.7 : 1,
+            }}
+          >
+            <Check size={12} />
+            {justReviewed ? "Reviewed just now" : "Mark reviewed"}
+          </button>
+        )}
+      </div>
 
       <AnimatePresence initial={false}>
         {expanded && (

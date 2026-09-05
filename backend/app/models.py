@@ -137,6 +137,10 @@ class WatchlistItem(Base):
     added_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )
+    # True only for a symbol the demo scenario itself added (not one the
+    # user already tracked before running it) — lets a reviewed demo alert
+    # clean itself out of the real watchlist instead of lingering forever.
+    is_demo: Mapped[bool] = mapped_column(nullable=False, default=False)
 
     watchlist: Mapped["Watchlist"] = relationship(back_populates="items")
     symbol: Mapped["Symbol"] = relationship()

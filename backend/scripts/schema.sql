@@ -48,6 +48,10 @@ CREATE TABLE IF NOT EXISTS watchlist_items (
 );
 CREATE INDEX IF NOT EXISTS idx_watchlist_items_watchlist ON watchlist_items(watchlist_id);
 CREATE INDEX IF NOT EXISTS idx_watchlist_items_symbol   ON watchlist_items(symbol_id);
+-- Migration: marks a symbol the demo scenario itself added (vs one the
+-- user already tracked) so a reviewed demo alert can clean itself out of
+-- the real watchlist instead of permanently mixing in with real holdings.
+ALTER TABLE watchlist_items ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT false;
 
 -- ── market_snapshots ─────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS market_snapshots (
