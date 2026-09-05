@@ -29,15 +29,20 @@ function ShellInner({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <div style={{ display: "flex" }}>
-      <Sidebar />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <Header summary={dashboard} onTriggerPoll={handleTriggerPoll} polling={polling} />
-        <main className="container" style={{ paddingBlock: 32 }}>
-          {children}
-        </main>
+    <>
+      <div className="ambient-bg">
+        <div className="ambient-blob-2" />
       </div>
-    </div>
+      <div className="app-content-layer" style={{ display: "flex" }}>
+        <Sidebar />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <Header summary={dashboard} onTriggerPoll={handleTriggerPoll} polling={polling} />
+          <main className="container" style={{ paddingBlock: 32 }}>
+            {children}
+          </main>
+        </div>
+      </div>
+    </>
   );
 }
 

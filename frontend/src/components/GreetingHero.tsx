@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Layers, Clock } from "lucide-react";
+import { Layers, Clock, ArrowRight } from "lucide-react";
 import { LiveTimestamp } from "./LiveTimestamp";
+import type { AttentionItem } from "@/lib/types";
 
 /**
  * Time-of-day in a specific IANA timezone — NOT the executing machine's
@@ -42,14 +43,22 @@ function firstName(displayName: string): string {
   return displayName.trim().split(/\s+/)[0] || displayName;
 }
 
+function levelColor(level: string): string {
+  if (level === "CRITICAL") return "var(--clr-critical)";
+  if (level === "HIGH") return "var(--clr-high)";
+  return "var(--clr-watch)";
+}
+
 interface Props {
   displayName: string;
   timezone: string;
-  itemsCount: number;
+  items: AttentionItem[];
   lastCheckedAt: string | null;
 }
 
-export function GreetingHero({ displayName, timezone, itemsCount, lastCheckedAt }: Props) {
+export function GreetingHero({ displayName, timezone, items, lastCheckedAt }: Props) {
+  const itemsCount = items.length;
+  const preview = items.slice(0, 3);
   // Computed client-side only, after mount — same pattern as LiveTimestamp —
   // so the greeting is never baked into server-rendered/static HTML using
   // the wrong clock, and re-checks periodically for long-lived tabs.
@@ -87,51 +96,72 @@ export function GreetingHero({ displayName, timezone, itemsCount, lastCheckedAt 
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.35, delay: 0.1 }}
         className={`card${itemsCount > 0 ? " glow-alert" : ""}`}
-        style={{
-          marginTop: 20,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 16,
-        }}
+        style={{ marginTop: 20, display: "flex", flexDirection: "column", gap: 16 }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <div
-            style={{
-              width: 42,
-              height: 42,
-              borderRadius: 11,
-              background: "var(--clr-accent-bg)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              flexShrink: 0,
-            }}
-          >
-            <Layers size={19} color="var(--clr-accent)" />
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <div
+              style={{
+                width: 42,
+                height: 42,
+                borderRadius: 11,
+                background: "var(--clr-accent-bg)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+              }}
+            >
+              <Layers size={19} color="var(--clr-accent)" />
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: "var(--clr-text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 600 }}>
+                Since you last checked
+              </div>
+              <div style={{ fontSize: 18, fontWeight: 700, marginTop: 2 }}>
+                {itemsCount > 0
+                  ? `${itemsCount} thing${itemsCount > 1 ? "s" : ""} deserve${itemsCount > 1 ? "" : "s"} your attention`
+                  : "Nothing needs your attention right now"}
+              </div>
+            </div>
           </div>
-          <div>
-            <div style={{ fontSize: 11, color: "var(--clr-text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 600 }}>
-              Since you last checked
-            </div>
-            <div style={{ fontSize: 18, fontWeight: 700, marginTop: 2 }}>
-              {itemsCount > 0
-                ? `${itemsCount} thing${itemsCount > 1 ? "s" : ""} deserve${itemsCount > 1 ? "" : "s"} your attention`
-                : "Nothing needs your attention right now"}
-            </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--clr-text-muted)", flexShrink: 0 }}>
+            <Clock size={13} />
+            {lastCheckedAt ? (
+              <>
+                Last checked <LiveTimestamp iso={lastCheckedAt} />
+              </>
+            ) : (
+              "First visit"
+            )}
           </div>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--clr-text-muted)", flexShrink: 0 }}>
-          <Clock size={13} />
-          {lastCheckedAt ? (
-            <>
-              Last checked <LiveTimestamp iso={lastCheckedAt} />
-            </>
-          ) : (
-            "First visit"
-          )}
-        </div>
+        {preview.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingTop: 4, borderTop: "1px solid var(--clr-border)" }}>
+            {preview.map((item) => (
+              <div key={item.symbol} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}>
+                <span className="badge-dot" style={{ background: levelColor(item.attention_level) }} />
+                <span style={{ fontWeight: 700, minWidth: 56 }}>{item.symbol}</span>
+                {item.price_change_pct !== null && (
+                  <span className={item.price_change_pct >= 0 ? "positive" : "negative"} style={{ fontWeight: 600, minWidth: 60 }}>
+                    {item.price_change_pct >= 0 ? "+" : ""}{item.price_change_pct.toFixed(1)}%
+                  </span>
+                )}
+                <span style={{ color: levelColor(item.attention_level), fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                  {item.attention_level}
+                </span>
+              </div>
+            ))}
+            <a
+              href="#attention-list"
+              style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 600, color: "var(--clr-accent)", textDecoration: "none", marginTop: 2 }}
+            >
+              View all <ArrowRight size={12} />
+            </a>
+          </div>
+        )}
       </motion.div>
     </div>
   );

@@ -5,6 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Trash2, Loader2 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { StockSearch } from "@/components/StockSearch";
+import { Sparkline } from "@/components/Sparkline";
 import { useWatchlists } from "@/hooks/useDashboard";
 import { useQuotes } from "@/hooks/useQuotes";
 import { api } from "@/lib/api";
@@ -69,18 +70,21 @@ function WatchlistsContent() {
               {watchlist.items.map((item) => {
                 const q = priceBySymbol.get(item.symbol.symbol);
                 const pct = q?.price_change_pct ?? null;
+                const isUp = pct !== null ? pct >= 0 : true;
                 return (
                   <div
                     key={item.id}
+                    className="watchlist-row"
                     style={{
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "space-between",
+                      gap: 16,
                       padding: "14px 20px",
                       borderBottom: "1px solid var(--clr-border)",
                     }}
                   >
-                    <div>
+                    <div style={{ minWidth: 0, flexShrink: 0 }}>
                       <div style={{ fontWeight: 700, fontSize: 14 }}>
                         {item.symbol.symbol}
                         {item.symbol.exchange && (
@@ -95,7 +99,11 @@ function WatchlistsContent() {
                       </div>
                     </div>
 
-                    <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
+                    <div style={{ flex: 1, minWidth: 90, maxWidth: 130 }}>
+                      <Sparkline symbol={item.symbol.symbol} isUp={isUp} />
+                    </div>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: 20, flexShrink: 0 }}>
                       <div className="tabular-nums" style={{ textAlign: "right" }}>
                         <div style={{ fontWeight: 700, fontSize: 14 }}>
                           {q?.current_price ? `$${Number(q.current_price).toFixed(2)}` : "—"}

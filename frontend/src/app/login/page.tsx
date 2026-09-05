@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { TrendingUp, Loader2 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+import { AuthHero } from "@/components/AuthHero";
 
 export default function LoginPage() {
   const { user, isLoading, login } = useAuth();
@@ -35,57 +36,59 @@ export default function LoginPage() {
 
   return (
     <div className="auth-bg">
-      <motion.div
-        initial={{ opacity: 0, y: 14 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.35 }}
-        className="card auth-card"
-        style={{ width: "100%", maxWidth: 380 }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 24 }}>
-          <div
-            style={{
-              width: 34,
-              height: 34,
-              borderRadius: 10,
-              background: "var(--clr-accent)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <TrendingUp size={18} color="#fff" />
+      <div className="auth-split">
+        <AuthHero />
+        <motion.div
+          initial={{ opacity: 0, y: 14 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35 }}
+          className="auth-form-col auth-card"
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 24 }}>
+            <div
+              style={{
+                width: 34,
+                height: 34,
+                borderRadius: 10,
+                background: "var(--clr-accent)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <TrendingUp size={18} color="#fff" />
+            </div>
+            <div style={{ fontWeight: 800, fontSize: 17 }}>Smart Watchlist</div>
           </div>
-          <div style={{ fontWeight: 800, fontSize: 17 }}>Smart Watchlist</div>
-        </div>
 
-        <h1 style={{ fontSize: 20, fontWeight: 800, marginBottom: 4 }}>Welcome back</h1>
-        <p style={{ fontSize: 13, color: "var(--clr-text-muted)", marginBottom: 20 }}>
-          Log in to see what changed while you were away.
-        </p>
+          <h1 style={{ fontSize: 20, fontWeight: 800, marginBottom: 4 }}>Welcome back</h1>
+          <p style={{ fontSize: 13, color: "var(--clr-text-muted)", marginBottom: 20 }}>
+            Log in to see what changed while you were away.
+          </p>
 
-        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <Field label="Email" type="email" value={email} onChange={setEmail} id="login-email" autoComplete="email" />
-          <Field label="Password" type="password" value={password} onChange={setPassword} id="login-password" autoComplete="current-password" />
+          <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <Field label="Email" type="email" value={email} onChange={setEmail} id="login-email" autoComplete="email" />
+            <Field label="Password" type="password" value={password} onChange={setPassword} id="login-password" autoComplete="current-password" />
 
-          {error && <div style={{ fontSize: 12, color: "var(--clr-critical)" }}>{error}</div>}
+            {error && <div style={{ fontSize: 12, color: "var(--clr-critical)" }}>{error}</div>}
 
-          <button type="submit" className="btn btn-primary" disabled={submitting} style={{ justifyContent: "center", marginTop: 4 }} id="login-submit">
-            {submitting ? <Loader2 size={14} className="spin" /> : "Log in"}
-          </button>
-        </form>
+            <button type="submit" className="btn btn-primary" disabled={submitting} style={{ justifyContent: "center", marginTop: 4 }} id="login-submit">
+              {submitting ? <Loader2 size={14} className="spin" /> : "Log in"}
+            </button>
+          </form>
 
-        <div style={{ fontSize: 13, color: "var(--clr-text-muted)", marginTop: 18, textAlign: "center" }}>
-          Don&apos;t have an account?{" "}
-          <Link href="/signup" style={{ color: "var(--clr-accent)", fontWeight: 600, textDecoration: "none" }}>
-            Sign up
-          </Link>
-        </div>
+          <div style={{ fontSize: 13, color: "var(--clr-text-muted)", marginTop: 18, textAlign: "center" }}>
+            Don&apos;t have an account?{" "}
+            <Link href="/signup" style={{ color: "var(--clr-accent)", fontWeight: 600, textDecoration: "none" }}>
+              Sign up
+            </Link>
+          </div>
 
-        <div style={{ fontSize: 11, color: "var(--clr-text-faint)", marginTop: 14, textAlign: "center" }}>
-          Demo account: demo@smartwatchlist.dev / demo12345
-        </div>
-      </motion.div>
+          <div style={{ fontSize: 11, color: "var(--clr-text-faint)", marginTop: 14, textAlign: "center" }}>
+            Demo account: demo@smartwatchlist.dev / demo12345
+          </div>
+        </motion.div>
+      </div>
     </div>
   );
 }

@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { TrendingUp, Loader2, Globe2 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+import { AuthHero } from "@/components/AuthHero";
 import { COUNTRIES, detectTimezone, guessCountryCode } from "@/lib/countries";
 
 export default function SignupPage() {
@@ -49,13 +50,14 @@ export default function SignupPage() {
 
   return (
     <div className="auth-bg">
-      <motion.div
-        initial={{ opacity: 0, y: 14 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.35 }}
-        className="card auth-card"
-        style={{ width: "100%", maxWidth: 380 }}
-      >
+      <div className="auth-split">
+        <AuthHero />
+        <motion.div
+          initial={{ opacity: 0, y: 14 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35 }}
+          className="auth-form-col auth-card"
+        >
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 24 }}>
           <div
             style={{
@@ -130,7 +132,8 @@ export default function SignupPage() {
             Log in
           </Link>
         </div>
-      </motion.div>
+        </motion.div>
+      </div>
     </div>
   );
 }

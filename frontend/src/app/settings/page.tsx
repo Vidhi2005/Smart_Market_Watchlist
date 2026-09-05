@@ -75,7 +75,8 @@ function SettingsContent() {
         Manage your profile and see system status.
       </p>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 20, maxWidth: 520 }}>
+      <div className="settings-grid">
+      <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
         {/* Profile */}
         <div className="card">
           <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 16 }}>Profile</h2>
@@ -165,7 +166,9 @@ function SettingsContent() {
             {saving ? "Saving…" : saved ? "Saved" : "Save changes"}
           </button>
         </div>
+      </div>
 
+      <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
         {/* Account */}
         <div className="card">
           <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>Account</h2>
@@ -217,6 +220,7 @@ function SettingsContent() {
             </div>
           )}
         </div>
+      </div>
       </div>
     </>
   );

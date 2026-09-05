@@ -262,9 +262,128 @@ a:focus-visible, button:focus-visible, input:focus-visible {
   pointer-events: none;
 }
 .auth-bg::before { background: var(--clr-accent); top: -120px; left: -110px; }
-.auth-bg::after  { background: #2563eb; bottom: -140px; right: -110px; animation-delay: -8s; }
+.auth-bg::after  { background: var(--clr-watch); bottom: -140px; right: -110px; animation-delay: -8s; }
 @keyframes aurora-drift {
   0%, 100% { transform: translate(0, 0) scale(1); }
   50%      { transform: translate(36px, 26px) scale(1.15); }
 }
 .auth-card { position: relative; z-index: 1; }
+
+/* ── Ambient background (authenticated app) ─────────────────────────────────
+   Deliberately recessive — a hint of texture, never competing with card
+   content for attention. Fixed + negative-safe via explicit z-index/layering
+   rather than z-index:-1 tricks. */
+.ambient-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.ambient-bg::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle, var(--clr-border-strong) 1px, transparent 1px);
+  background-size: 26px 26px;
+  -webkit-mask-image: radial-gradient(ellipse 60% 55% at 50% 0%, black, transparent 72%);
+  mask-image: radial-gradient(ellipse 60% 55% at 50% 0%, black, transparent 72%);
+  opacity: 0.6;
+}
+.ambient-bg::after {
+  content: "";
+  position: absolute;
+  width: 620px;
+  height: 620px;
+  border-radius: 50%;
+  background: var(--clr-accent);
+  filter: blur(150px);
+  opacity: 0.08;
+  top: -220px;
+  right: -180px;
+}
+.ambient-blob-2 {
+  position: absolute;
+  width: 520px;
+  height: 520px;
+  border-radius: 50%;
+  background: var(--clr-watch);
+  filter: blur(140px);
+  opacity: 0.05;
+  bottom: -200px;
+  left: -160px;
+}
+.app-content-layer { position: relative; z-index: 1; }
+
+/* ── Auth split layout (login / signup) ──────────────────────────────────── */
+.auth-split {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  width: 100%;
+  max-width: 980px;
+  min-height: 560px;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-pop);
+}
+.auth-hero-col {
+  position: relative;
+  background: var(--clr-text);
+  color: var(--clr-bg);
+  overflow: hidden;
+  padding: 44px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.auth-form-col {
+  background: var(--clr-surface);
+  padding: 44px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.auth-hero-dotgrid {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle, rgba(255,255,255,0.14) 1px, transparent 1px);
+  background-size: 22px 22px;
+  -webkit-mask-image: radial-gradient(ellipse 70% 60% at 30% 20%, black, transparent 75%);
+  mask-image: radial-gradient(ellipse 70% 60% at 30% 20%, black, transparent 75%);
+}
+.auth-metric-chip {
+  position: absolute;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+  backdrop-filter: blur(6px);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: inherit;
+}
+@media (max-width: 860px) {
+  .auth-split { grid-template-columns: 1fr; max-width: 420px; min-height: 0; }
+  .auth-hero-col { display: none; }
+}
+
+/* ── Settings two-column layout ──────────────────────────────────────────── */
+.settings-grid {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr;
+  gap: 20px;
+  align-items: start;
+  max-width: 900px;
+}
+@media (max-width: 760px) {
+  .settings-grid { grid-template-columns: 1fr; max-width: 520px; }
+}
+
+/* ── Watchlist row hover ──────────────────────────────────────────────────── */
+.watchlist-row {
+  transition: background-color 0.15s ease;
+}
+.watchlist-row:hover {
+  background: var(--clr-surface-2);
+}
