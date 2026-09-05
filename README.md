@@ -1,52 +1,52 @@
 # Smart Market Watchlist
 
-**An attention engine for your stock watchlist.**
+**An attention engine for your stock watchlist — not a data display tool.**
 
-## The Pitch
+## Why this exists
 
-Most watchlists show you a price. This one tells you whether that price
-actually matters. A watchlist's real job is triage, not decoration — so
-every tracked stock (US and Indian equities, each on its own market
-calendar) is scored against five weighted signals — price move, volume,
-relative-to-market move, breakout, news surge — and below-threshold noise
-is filtered out entirely. What's left gets a plain-English explanation
-and a live sparkline, and "since you checked" is a genuine per-user
-baseline (real accounts, not a shared demo fiction), kept distinct from
-"today's move" because they honestly answer different questions.
+Every stock app already shows price, percent change, volume, and a
+chart. None of that is hard to build, and none of it answers the
+question someone watching a growing list of stocks actually has: *which
+of these needs my attention right now?* A watchlist that just displays
+numbers gets *harder* to use as it grows — more stocks means more
+numbers to manually scan, not more insight. This one inverts that: the
+system decides what's worth surfacing, explains its reasoning in plain
+language, and stays quiet for everything else.
+
+## What it does
+
+| | |
+|---|---|
+| **Filters noise, doesn't just display it** | Every move is scored against five weighted signals — price move, volume spike, relative-to-market move, breakout, news surge — and anything below threshold never reaches the user. A watchlist's job is triage, not decoration. |
+| **Contextualizes every move against the market** | A stock up 3% on a day the benchmark is up 2.8% did nothing unusual. The same move on a flat day is real — the relative-move signal accounts for both, not just the raw percentage. |
+| **Explains itself, always** | Every attention card expands into its exact signal breakdown (price/volume/relative/breakout/news, each a real number) plus a plain-English explanation — never a bare score with no reasoning behind it. |
+| **Distinguishes "since you checked" from "today's move"** | Two people who added NVDA at different times see different "since you checked" numbers from the same market event — a genuine per-user baseline, not a demo fiction, kept honestly separate from the day's headline change. |
+| **Tracks two markets on their own clocks** | US and Indian equities, each polled against its own market calendar — not a single US-only clock with an Indian ticker bolted on. |
+| **Fails over for real, and says so** | Every provider-resilience claim in this README was live-tested against the actual endpoints, not assumed from documentation — including a provider that was built, verified, and deliberately left inactive because its real limits didn't fit the job. |
 
 **How it's designed.** The core bet is a strict split between *global
 market state* (symbols, prices, events — computed once, shared by every
 user tracking that symbol) and *per-user observation state* (your own
-"last checked" baseline). That split is what makes "since you checked"
-possible without duplicating work per user. Market data comes through a
-provider chain that genuinely fails over — live-tested against real
-endpoints, not assumed from documentation — and flags cross-provider
-disagreement instead of silently averaging it away. Explanations (Gemini,
+"last checked" baseline) — that split is what makes "since you checked"
+possible without duplicating work per user. Explanations (Gemini,
 hallucination-guarded, with a template fallback) are generated once per
-event during background ingestion, never in a user's request — so the
-read path never waits on a provider or an LLM, measured at 30-70ms for
-5-100 stocks, benchmarked rather than claimed.
-
-**The thinking behind the key choices**, in short: real auth because a
-fake per-user baseline would make the whole premise a demo trick; polling
-over WebSockets because the product is "see what changed," not a live
-trading ticker, so the added infrastructure wouldn't buy anything real;
-an event only fires on an actual state transition, not every poll a stock
-stays elevated, because that's the difference between an alert and noise;
-and every resilience claim below is something that was actually tested
-against a live endpoint, not inferred from a pricing page — including the
-provider that got built, verified, and deliberately left switched off
-because its real limits didn't fit the job. The full reasoning for each
-is in [Key Design Decisions](#key-design-decisions) and
-[Provider resilience](#provider-resilience) below.
+event during background ingestion, never in a user's request, so the read
+path never waits on a provider or an LLM — measured at 30-70ms for
+5-100 stocks, benchmarked rather than claimed. The full reasoning behind
+every choice above is in [Key Design Decisions](#key-design-decisions),
+[Provider resilience](#provider-resilience), and [Data model](#data-model)
+below.
 
 ---
 
-**Contents:** [Architecture](#architecture) ·
+**Contents:** [Why this exists](#why-this-exists) ·
+[What it does](#what-it-does) ·
+[Architecture](#architecture) ·
 [Core idea: global market state vs. per-user observation](#global-market-state-vs-per-user-observation) ·
 [Provider resilience](#provider-resilience) ·
 [Latency](#latency) ·
 [Design decisions](#key-design-decisions) ·
+[Data model](#data-model) ·
 [Scoring](#scoring) ·
 [Demo Mode](#demo-mode) ·
 [Quick Start](#quick-start) ·
@@ -58,27 +58,48 @@ is in [Key Design Decisions](#key-design-decisions) and
 ## Architecture
 
 ```
-┌─────────────────────────────────────┐
-│       Next.js Frontend (:3000)       │
-│     React Query · adaptive polling   │
-└──────────────────┬────────────────────┘
-                    │ HTTP/REST + JWT bearer
-┌───────────────────▼────────────────────┐
-│        FastAPI Backend (:8000)          │
-│        APScheduler · JWT auth           │
-└────┬─────────┬─────────┬─────────┬──────┘
-     │         │         │         │
-     ▼         ▼         ▼         ▼
- Finnhub +  yfinance  PostgreSQL  Gemini
- Twelve Data (NSE/BSE)    DB     LLM API
-  (US/global)
+                ┌──────────────┐
+                │  Scheduler   │  poll every 45s, per symbol
+                │(APScheduler) │  provider chain: Finnhub → Twelve Data → yfinance
+                └──────┬───────┘
+                       │
+                ┌──────▼───────┐
+                │   Signals    │  price move · volume spike · relative move
+                │ (pure fns)   │  breakout · news surge — 5 independent scores
+                └──────┬───────┘
+                       │
+                ┌──────▼───────┐
+                │   Scoring +  │  weighted score → attention level
+                │   Lifecycle  │  event only on a real transition, not every poll
+                └──────┬───────┘
+                       │
+                ┌──────▼───────┐
+                │ Explanation  │  Gemini, hallucination-guarded,
+                │ (once/event) │  template fallback if the LLM is unavailable
+                └──────┬───────┘
+                       │
+                ┌──────▼───────┐
+                │ MarketEvent  │  global — shared by every user tracking the symbol
+                └──────┬───────┘
+                       │
+              ┌────────▼─────────┐
+              │ attention_service │  per-user "since you checked" baseline
+              │  (pure DB read)   │  joined in at read time, never duplicated
+              └────────┬──────────┘
+                       │ REST + JWT bearer
+              ┌────────▼──────────┐
+              │      Frontend      │
+              │ Next.js · React Query│
+              └─────────────────────┘
 ```
 
-Symbols are routed to a per-market provider chain by ticker suffix
-(`.NS`/`.BO` → yfinance, everything else → Finnhub → Twelve Data as
-fallback) — a genuine US + Indian equities tracker, each on its own
-market calendar, not a single US-only clock with an Indian ticker
-bolted on.
+Every stage is a pure, independently-testable module with one job — the
+signal functions and scoring math don't know a provider or a database
+exists, and the provider chain doesn't know scoring exists. Symbols are
+routed to a per-market chain by ticker suffix (`.NS`/`.BO` → yfinance,
+everything else → Finnhub → Twelve Data as fallback) — a genuine US +
+Indian equities tracker on two separate market calendars, not a
+single US-only clock with an Indian ticker bolted on.
 
 ## Global market state vs. per-user observation
 
@@ -181,6 +202,21 @@ when both are closed, and stop entirely on a backgrounded tab.
 | **One watchlist surfaced per user** | The schema supports more, but the product's actual job — triage what changed — doesn't need multi-watchlist juggling to prove the idea |
 | **Conflict detection at ticker-add time, not continuous** | Cross-checking every provider on every poll would double ongoing API calls against free-tier limits for a check that matters once, at resolution time, not every 45 seconds |
 
+## Data model
+
+`MarketEvent` is append-only — a row is written once, on a real
+transition, and never updated or deleted. That's the shared signal
+history, and it's what the "since you checked" replay and the "did this
+symbol re-alert" dedup check both read from.
+
+`UserObservation` is the opposite shape on purpose: exactly one row per
+(user, symbol), updated in place, holding just a pointer — "last checked
+at this time, against this snapshot." It's not a copy of the event log
+per user; it's the single cheap fact that turns a shared, global event
+into a personal "here's what changed for *you*" answer at read time.
+Reviewing an alert (or a demo scenario cleaning itself up once reviewed)
+is exactly this row being touched — nothing else in the system changes.
+
 ## Scoring
 
 | Signal | Weight |
@@ -272,3 +308,8 @@ frontend/src/
 | POST | `/api/observations/commit` | Advance "last checked" baseline |
 | GET | `/api/dashboard` | Per-user summary + market hours |
 | POST | `/api/admin/demo-scenario` | Seed the demo scenario |
+
+---
+
+**Smart Market Watchlist** — not a data display tool. A triage system
+for your attention.
