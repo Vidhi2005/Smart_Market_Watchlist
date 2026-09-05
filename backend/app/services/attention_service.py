@@ -4,6 +4,7 @@ Attention service — the core "what changed since you last looked?" engine.
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
@@ -21,7 +22,6 @@ from app.models import (
     WatchlistItem,
 )
 from app.schemas import AttentionItem, ChangesResponse, NewsEventOut, SignalBreakdown
-from app.services.explanation_service import get_or_generate_explanation
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +41,11 @@ async def get_changes(
 
     Queries are batched across the whole watchlist rather than per-symbol —
     a 50-stock watchlist used to mean ~7N queries; this is a fixed handful
-    regardless of N.
+    regardless of N. Pure read: score, confidence, and explanation are all
+    read directly off the event's own `signals` JSONB (written once during
+    ingestion) — this function never calls an LLM or an external provider.
     """
+    t0 = time.perf_counter()
     wl_result = await db.execute(
         select(Watchlist)
         .where(Watchlist.id == watchlist_id, Watchlist.user_id == user_id)
@@ -106,7 +109,6 @@ async def get_changes(
     news_by_symbol: dict[str, list[NewsEvent]] = {}
     for n in news_result.scalars().all():
         news_by_symbol.setdefault(n.symbol_id, []).append(n)
-    news_cutoff_24h = now - timedelta(hours=24)
 
     items: list[AttentionItem] = []
 
@@ -123,26 +125,19 @@ async def get_changes(
             continue
 
         best_event = max(events_since_baseline, key=lambda e: float(e.signals.get("final_score", 0)))
-
         symbol_news = news_by_symbol.get(symbol.id, [])
-        news_24h = sum(1 for n in symbol_news if n.published_at >= news_cutoff_24h)
 
-        ua = await get_or_generate_explanation(
-            db=db,
-            event=best_event,
-            symbol=symbol,
-            user_id=user_id,
-            avg_volume=avg_vol_by_symbol.get(symbol.id, 0.0),
-            news_count_24h=news_24h,
-        )
-        await db.commit()
-
-        if ua.attention_level == "NO_CHANGE":
-            continue
+        # Pure read — score, confidence, explanation were all computed once
+        # during ingestion (see ingestion_service.run_change_detection) and
+        # live directly on the event's signals. No LLM call, no write, no
+        # per-user duplication: every user watching this symbol reads the
+        # exact same event row.
+        sigs = best_event.signals
+        attention_level = sigs.get("attention_level", "WATCH")
+        if attention_level == "NO_CHANGE":
+            continue  # defensive — run_change_detection never persists these
 
         snap = latest_snap_by_symbol.get(symbol.id)
-
-        sigs = best_event.signals
         stock_pct = float(sigs.get("stock_pct_change", 0))
         bench_pct = float(sigs.get("bench_pct_change", 0))
         freshness = snap.quality_status if snap else "STALE"
@@ -166,11 +161,11 @@ async def get_changes(
                 symbol=symbol.symbol,
                 company_name=symbol.company_name,
                 sector=symbol.sector,
-                attention_level=ua.attention_level,
-                score=float(ua.score),
-                confidence=float(ua.confidence),
-                explanation=ua.explanation or "",
-                explanation_source=ua.explanation_source,
+                attention_level=attention_level,
+                score=float(sigs.get("final_score", 0)),
+                confidence=float(sigs.get("confidence", 1.0)),
+                explanation=sigs.get("explanation") or "",
+                explanation_source=sigs.get("explanation_source", "template"),
                 event_type=best_event.event_type,
                 magnitude=float(best_event.magnitude) if best_event.magnitude else None,
                 current_price=snap.price if snap else None,
@@ -204,6 +199,12 @@ async def get_changes(
         )
 
     items.sort(key=lambda x: x.score, reverse=True)
+
+    elapsed_ms = (time.perf_counter() - t0) * 1000
+    logger.debug(
+        "get_changes: %d symbols -> %d items in %.1fms (no external calls)",
+        len(symbol_ids), len(items), elapsed_ms,
+    )
 
     return ChangesResponse(
         watchlist_id=watchlist_id,

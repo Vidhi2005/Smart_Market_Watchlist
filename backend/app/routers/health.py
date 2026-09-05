@@ -6,7 +6,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.schemas import HealthResponse
+from app.schemas import HealthResponse, IngestionStats
 
 router = APIRouter(tags=["health"])
 
@@ -19,7 +19,10 @@ async def health(db: AsyncSession = Depends(get_db)) -> HealthResponse:
     except Exception as exc:  # noqa: BLE001
         db_status = f"error: {exc}"
 
+    from app.services.ingestion_service import ingestion_stats
+
     return HealthResponse(
         status="ok" if db_status == "ok" else "degraded",
         db=db_status,
+        ingestion=IngestionStats(**ingestion_stats),
     )

@@ -206,7 +206,21 @@ class CommitObservationsRequest(BaseModel):
 
 
 # ── Health ────────────────────────────────────────────────────────────────────
+class IngestionStats(BaseModel):
+    """Real operational counters — not a metrics platform, just enough to
+    answer "is ingestion actually working" from the outside."""
+    last_poll_started_at: Optional[datetime] = None
+    last_poll_completed_at: Optional[datetime] = None
+    last_poll_duration_seconds: Optional[float] = None
+    last_poll_symbols_processed: int = 0
+    last_poll_provider_failures: int = 0
+    last_poll_fallback_used: int = 0
+    llm_calls_total: int = 0
+    llm_fallback_total: int = 0
+
+
 class HealthResponse(BaseModel):
     status: str
     db: str
     version: str = "1.0.0"
+    ingestion: IngestionStats = IngestionStats()

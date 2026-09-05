@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -20,8 +21,23 @@ from app.models import MarketEvent, MarketSnapshot, Symbol, UserObservation
 from app.providers.base import MarketDataProvider, QuoteData
 from app.providers.finnhub_provider import FinnhubProvider
 from app.providers.yfinance_provider import YFinanceProvider
+from app.services.explanation_service import generate_event_explanation
 
 logger = logging.getLogger(__name__)
+
+# Lightweight in-process operational counters, exposed via /api/health.
+# Deliberately not a metrics platform — just enough to answer "is ingestion
+# actually working" without grepping logs.
+ingestion_stats = {
+    "last_poll_started_at": None,
+    "last_poll_completed_at": None,
+    "last_poll_duration_seconds": None,
+    "last_poll_symbols_processed": 0,
+    "last_poll_provider_failures": 0,
+    "last_poll_fallback_used": 0,
+    "llm_calls_total": 0,
+    "llm_fallback_total": 0,
+}
 
 # ── Provider routing ──────────────────────────────────────────────────────────
 # .NS = NSE (National Stock Exchange of India)
@@ -218,6 +234,28 @@ async def run_change_detection(
 
     transition = classify_transition(prev_level, prev_score, result.attention_level, result.final_score)
 
+    # Generate the explanation HERE — during background ingestion, once per
+    # event — never inside a user's GET /changes request. volume_ratio is
+    # the real current/average ratio (we have both numbers on hand), not
+    # the crude back-conversion from the normalized 0-1 signal score that
+    # the old per-user-lazy path had to use for lack of direct access.
+    volume_ratio = (float(snapshot.volume) / avg_vol) if (snapshot.volume and avg_vol > 0) else 1.0
+    explanation_text, explanation_source = await generate_event_explanation(
+        symbol=symbol.symbol,
+        company_name=symbol.company_name,
+        attention_level=result.attention_level,
+        stock_pct_change=stock_pct,
+        bench_pct_change=bench_pct,
+        volume_ratio=volume_ratio,
+        news_count_24h=news_24h,
+        breakout=signals.breakout,
+        current_price=float(snapshot.price),
+        event_type="COMPOSITE",
+    )
+    ingestion_stats["llm_calls_total"] += 1
+    if explanation_source == "template":
+        ingestion_stats["llm_fallback_total"] += 1
+
     # Build signals JSONB payload
     signals_payload = {
         "price_move":          round(signals.price_move, 4),
@@ -233,6 +271,9 @@ async def run_change_detection(
         "stock_pct_change":    round(stock_pct, 4),
         "bench_pct_change":    round(bench_pct, 4),
         "transition":          transition,
+        "volume_ratio":        round(volume_ratio, 4),
+        "explanation":         explanation_text,
+        "explanation_source":  explanation_source,
     }
 
     event = MarketEvent(
@@ -252,6 +293,12 @@ async def run_change_detection(
 async def poll_market_data() -> None:
     """Fetch quotes for all tracked symbols and run change detection."""
     # Provider is chosen per-symbol inside the loop; no single provider here
+    poll_started = datetime.now(tz=timezone.utc)
+    ingestion_stats["last_poll_started_at"] = poll_started
+    t0 = time.perf_counter()
+    processed = 0
+    provider_failures = 0
+    fallback_used = 0
 
     async with AsyncSessionLocal() as db:
         # Get all unique symbols currently in any watchlist
@@ -274,7 +321,9 @@ async def poll_market_data() -> None:
                 quote, used_fallback = await get_quote_with_fallback(symbol.symbol)
                 if used_fallback:
                     logger.info("Used fallback provider for %s", symbol.symbol)
+                    fallback_used += 1
                 if not quote:
+                    provider_failures += 1
                     # Mark last snapshot STALE
                     last = await db.execute(
                         select(MarketSnapshot)
@@ -305,6 +354,7 @@ async def poll_market_data() -> None:
 
                 await run_change_detection(db, symbol, snapshot)
                 await db.commit()
+                processed += 1
                 logger.debug("Ingested %s @ %s", symbol.symbol, quote.price)
 
                 # Rate-limit courtesy: 1 req/sec
@@ -312,7 +362,19 @@ async def poll_market_data() -> None:
 
             except Exception as exc:  # noqa: BLE001
                 logger.error("Error polling %s: %s", symbol.symbol, exc)
+                provider_failures += 1
                 await db.rollback()
+
+    duration = time.perf_counter() - t0
+    ingestion_stats["last_poll_completed_at"] = datetime.now(tz=timezone.utc)
+    ingestion_stats["last_poll_duration_seconds"] = round(duration, 2)
+    ingestion_stats["last_poll_symbols_processed"] = processed
+    ingestion_stats["last_poll_provider_failures"] = provider_failures
+    ingestion_stats["last_poll_fallback_used"] = fallback_used
+    logger.info(
+        "Poll complete: %d/%d symbols in %.2fs (%d failures, %d fallback)",
+        processed, len(symbols), duration, provider_failures, fallback_used,
+    )
 
 
 # ── Historical bootstrap ──────────────────────────────────────────────────────
