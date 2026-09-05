@@ -57,40 +57,14 @@ below.
 
 ## Architecture
 
-```
-                ┌──────────────┐
-                │  Scheduler   │  poll every 45s, per symbol
-                │(APScheduler) │  provider chain: Finnhub → Twelve Data → yfinance
-                └──────┬───────┘
-                       │
-                ┌──────▼───────┐
-                │   Signals    │  price move · volume spike · relative move
-                │ (pure fns)   │  breakout · news surge — 5 independent scores
-                └──────┬───────┘
-                       │
-                ┌──────▼───────┐
-                │   Scoring +  │  weighted score → attention level
-                │   Lifecycle  │  event only on a real transition, not every poll
-                └──────┬───────┘
-                       │
-                ┌──────▼───────┐
-                │ Explanation  │  Gemini, hallucination-guarded,
-                │ (once/event) │  template fallback if the LLM is unavailable
-                └──────┬───────┘
-                       │
-                ┌──────▼───────┐
-                │ MarketEvent  │  global — shared by every user tracking the symbol
-                └──────┬───────┘
-                       │
-              ┌────────▼─────────┐
-              │ attention_service │  per-user "since you checked" baseline
-              │  (pure DB read)   │  joined in at read time, never duplicated
-              └────────┬──────────┘
-                       │ REST + JWT bearer
-              ┌────────▼──────────┐
-              │      Frontend      │
-              │ Next.js · React Query│
-              └─────────────────────┘
+```mermaid
+flowchart TD
+    A["Scheduler (APScheduler)<br/>poll every 45s per symbol<br/>chain: Finnhub → Twelve Data → yfinance"] --> B["Signals (pure fns)<br/>price move · volume spike · relative move<br/>breakout · news surge"]
+    B --> C["Scoring + Lifecycle<br/>weighted score → attention level<br/>event only on a real transition"]
+    C --> D["Explanation (once/event)<br/>Gemini, hallucination-guarded<br/>template fallback if LLM unavailable"]
+    D --> E["MarketEvent<br/>global, shared by every user tracking the symbol"]
+    E --> F["attention_service (pure DB read)<br/>per-user 'since you checked' baseline<br/>joined in at read time, never duplicated"]
+    F -->|REST + JWT bearer| G["Frontend<br/>Next.js · React Query"]
 ```
 
 Every stage is a pure, independently-testable module with one job — the
@@ -201,6 +175,7 @@ when both are closed, and stop entirely on a backgrounded tab.
 | **Timezone-aware timestamps everywhere** | A naive UTC default silently gets reinterpreted as local time by this stack — fixed at the model layer |
 | **One watchlist surfaced per user** | The schema supports more, but the product's actual job — triage what changed — doesn't need multi-watchlist juggling to prove the idea |
 | **Conflict detection at ticker-add time, not continuous** | Cross-checking every provider on every poll would double ongoing API calls against free-tier limits for a check that matters once, at resolution time, not every 45 seconds |
+| **Tests target pure functions + mocked provider failures, not live integrations** | Signal math, scoring, and the fallback chain's exception handling are exactly the logic worth pinning down in isolation; the fallback chain itself and the demo scenario are verified against the real APIs directly instead of through DB-fixture integration tests |
 
 ## Data model
 
