@@ -4,6 +4,7 @@ import Link from "next/link";
 import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 import type { QuoteOut } from "@/lib/types";
 import { FreshnessIndicator } from "./FreshnessIndicator";
+import { StockAvatar } from "./StockAvatar";
 
 interface Props {
   quotes: QuoteOut[];
@@ -78,17 +79,23 @@ export function MarketOverview({ quotes, flaggedSymbols, isLoading }: Props) {
               return (
                 <tr
                   key={q.symbol}
+                  className="hover-row"
                   style={{ borderBottom: "1px solid var(--clr-border)" }}
                 >
                   <td style={{ padding: "12px 20px" }}>
-                    <Link
-                      href={`/stocks/${q.symbol}`}
-                      style={{ fontWeight: 700, color: "var(--clr-text)", textDecoration: "none" }}
-                    >
-                      {q.symbol}
-                    </Link>
-                    <div style={{ fontSize: 11, color: "var(--clr-text-muted)", marginTop: 1 }}>
-                      {q.company_name}
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <StockAvatar symbol={q.symbol} companyName={q.company_name} size={30} />
+                      <div>
+                        <Link
+                          href={`/stocks/${q.symbol}`}
+                          style={{ fontWeight: 700, color: "var(--clr-text)", textDecoration: "none" }}
+                        >
+                          {q.symbol}
+                        </Link>
+                        <div style={{ fontSize: 11, color: "var(--clr-text-muted)", marginTop: 1 }}>
+                          {q.company_name}
+                        </div>
+                      </div>
                     </div>
                   </td>
                   <td className="tabular-nums" style={{ padding: "12px 20px", textAlign: "right", fontWeight: 600 }}>

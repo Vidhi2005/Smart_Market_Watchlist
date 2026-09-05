@@ -11,6 +11,7 @@ import { FreshnessIndicator } from "@/components/FreshnessIndicator";
 import { CardSkeleton } from "@/components/Skeleton";
 import { PriceChart } from "@/components/PriceChart";
 import { RequireAuth } from "@/components/RequireAuth";
+import { MarketTickerTape } from "@/components/MarketTickerTape";
 
 // We derive stock detail from the changes response to avoid a new endpoint
 function useStockDetail(symbol: string) {
@@ -39,14 +40,18 @@ function StockDetailInner() {
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--clr-bg)" }}>
-      {/* Simple header */}
+      <MarketTickerTape />
       <header
         style={{
-          padding: "20px 24px",
+          padding: "16px 24px",
+          background: "#ffffff",
           borderBottom: "1px solid var(--clr-border)",
           display: "flex",
           alignItems: "center",
           gap: 16,
+          position: "sticky",
+          top: 0,
+          zIndex: 35,
         }}
       >
         <Link

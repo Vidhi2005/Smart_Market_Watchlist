@@ -1,28 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { motion } from "framer-motion";
-import { useSpotlight } from "@/hooks/useSpotlight";
-
-function useCountUp(target: number, duration = 500): number {
-  const [value, setValue] = useState(target);
-  useEffect(() => {
-    const start = value;
-    const diff = target - start;
-    if (diff === 0) return;
-    const startTime = performance.now();
-    let raf: number;
-    const tick = (now: number) => {
-      const progress = Math.min(1, (now - startTime) / duration);
-      setValue(Math.round(start + diff * progress));
-      if (progress < 1) raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [target]);
-  return value;
-}
+import { Activity, AlertCircle, AlertTriangle, Eye } from "lucide-react";
 
 export function AttentionSummary({
   critical,
@@ -40,31 +18,80 @@ export function AttentionSummary({
       style={{
         display: "grid",
         gridTemplateColumns: "repeat(4, 1fr)",
-        gap: 12,
+        gap: 14,
         marginBottom: 24,
       }}
     >
-      <StatCard value={total} label="Tracked Symbols" color="var(--clr-text)" />
-      <StatCard value={critical} label="Critical" color="var(--clr-critical)" />
-      <StatCard value={high} label="High" color="var(--clr-high)" />
-      <StatCard value={watch} label="Watch" color="var(--clr-watch)" />
+      <StatCard
+        value={total}
+        label="Tracked Symbols"
+        color="#0f172a"
+        accentColor="#94a3b8"
+        icon={<Activity size={16} />}
+      />
+      <StatCard
+        value={critical}
+        label="Critical Attention"
+        color="var(--clr-critical)"
+        accentColor="var(--clr-critical)"
+        icon={<AlertCircle size={16} />}
+      />
+      <StatCard
+        value={high}
+        label="High Priority"
+        color="var(--clr-high)"
+        accentColor="var(--clr-high)"
+        icon={<AlertTriangle size={16} />}
+      />
+      <StatCard
+        value={watch}
+        label="Watch List"
+        color="var(--clr-watch)"
+        accentColor="var(--clr-watch)"
+        icon={<Eye size={16} />}
+      />
     </div>
   );
 }
 
-function StatCard({ value, label, color }: { value: number; label: string; color: string }) {
-  const animated = useCountUp(value);
-  const handleSpotlight = useSpotlight();
+function StatCard({
+  value,
+  label,
+  color,
+  accentColor,
+  icon,
+}: {
+  value: number;
+  label: string;
+  color: string;
+  accentColor: string;
+  icon: React.ReactNode;
+}) {
   return (
-    <motion.div
-      className="card spotlight tabular-nums"
-      onMouseMove={handleSpotlight}
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      style={{ textAlign: "center", padding: "16px 12px" }}
+    <div
+      className="card tabular-nums"
+      style={{
+        padding: "16px 18px",
+        position: "relative",
+        overflow: "hidden",
+        borderTop: `3px solid ${accentColor}`,
+      }}
     >
-      <div style={{ fontSize: 30, fontWeight: 800, color, lineHeight: 1 }}>{animated}</div>
-      <div style={{ fontSize: 12, color: "var(--clr-text-muted)", marginTop: 4 }}>{label}</div>
-    </motion.div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: "var(--clr-text-muted)" }}>{label}</span>
+        <span style={{ color: accentColor, opacity: 0.85 }}>{icon}</span>
+      </div>
+      <div
+        style={{
+          fontSize: 28,
+          fontWeight: 800,
+          color,
+          lineHeight: 1,
+          letterSpacing: "-0.02em",
+        }}
+      >
+        {value}
+      </div>
+    </div>
   );
 }

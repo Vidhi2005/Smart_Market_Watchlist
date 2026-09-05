@@ -54,7 +54,9 @@ export function Sparkline({ symbol, isUp }: Props) {
             stroke={resolvedColor}
             strokeWidth={1.75}
             fill={`url(#${gradId})`}
-            isAnimationActive={false}
+            isAnimationActive
+            animationDuration={700}
+            animationEasing="ease-out"
           />
         </AreaChart>
       </ResponsiveContainer>

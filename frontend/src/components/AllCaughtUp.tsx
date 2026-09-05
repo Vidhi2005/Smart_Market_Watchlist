@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { CheckCircle2 } from "lucide-react";
+import { ShieldCheck } from "lucide-react";
 
 export function AllCaughtUp() {
   return (
@@ -14,33 +14,52 @@ export function AllCaughtUp() {
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        padding: "72px 24px",
+        padding: "56px 24px",
         textAlign: "center",
-        gap: 14,
+        gap: 16,
       }}
       id="all-caught-up-state"
     >
       <div
         style={{
-          width: 56,
-          height: 56,
+          width: 52,
+          height: 52,
           borderRadius: "50%",
-          background: "var(--clr-accent-bg)",
+          background: "var(--clr-green-bg)",
+          border: "1px solid var(--clr-green-border)",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
         }}
       >
-        <CheckCircle2 size={28} color="var(--clr-accent)" />
+        <ShieldCheck size={26} color="var(--clr-green)" />
       </div>
-      <h2 style={{ fontSize: 22, fontWeight: 800 }}>You&apos;re all caught up</h2>
-      <p style={{ color: "var(--clr-text-muted)", maxWidth: 380, lineHeight: 1.6, fontSize: 14 }}>
-        No significant changes since you last checked your watchlist. We&apos;ll surface
-        something here the moment it&apos;s worth your attention.
-      </p>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--clr-text-faint)" }}>
-        <span className="pulse-dot" style={{ background: "var(--clr-accent)" }} />
-        Watching in the background
+
+      <div style={{ maxWidth: 440 }}>
+        <h2 style={{ fontSize: 20, fontWeight: 800, color: "#0f172a", letterSpacing: "-0.01em" }}>
+          You&apos;re completely caught up
+        </h2>
+        <p style={{ color: "var(--clr-text-muted)", marginTop: 6, lineHeight: 1.6, fontSize: 13 }}>
+          No abnormal price velocity, volume divergences, or unusual news catalysts since your last baseline.
+          All tracked stocks are trading smoothly within standard bounds.
+        </p>
+      </div>
+
+      <div
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 6,
+          fontSize: 12,
+          color: "var(--clr-text-muted)",
+          background: "var(--clr-surface-2)",
+          padding: "4px 12px",
+          borderRadius: 999,
+          border: "1px solid var(--clr-border)",
+        }}
+      >
+        <span className="pulse-dot" />
+        <span>Continuous monitoring active</span>
       </div>
     </motion.div>
   );

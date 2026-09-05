@@ -5,6 +5,7 @@ import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import type { AttentionItem } from "@/lib/types";
 import { SignalBreakdownBars, SignalChips } from "./SignalBreakdown";
+import { StockAvatar } from "./StockAvatar";
 import { FreshnessIndicator } from "./FreshnessIndicator";
 import { Sparkline } from "./Sparkline";
 import { TrendingUp, TrendingDown, Newspaper, ChevronDown, Info, ExternalLink, Check } from "lucide-react";
@@ -19,14 +20,7 @@ interface AttentionCardProps {
 
 export function AttentionCard({ item, index, onMarkReviewed, isMarking }: AttentionCardProps) {
   const [expanded, setExpanded] = useState(false);
-  // Purely a local acknowledgment that the click landed — not a claim
-  // that the card has been removed. The card only actually disappears
-  // once the changes query is refetched and the backend no longer
-  // returns this symbol (see page.tsx's onMarkReviewed / commit flow).
   const [justReviewed, setJustReviewed] = useState(false);
-  // "Since you checked" is the actual product promise — prefer it as the
-  // primary number. Falls back to today's move (vs previous_close) for a
-  // symbol with no prior baseline yet (e.g. just added).
   const hasSinceChecked = item.since_checked_change_pct !== null;
   const primaryPct = hasSinceChecked ? item.since_checked_change_pct! : (item.price_change_pct ?? 0);
   const isUp = primaryPct >= 0;
@@ -35,10 +29,10 @@ export function AttentionCard({ item, index, onMarkReviewed, isMarking }: Attent
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 16 }}
+      initial={{ opacity: 0, y: 14 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -8 }}
-      transition={{ duration: 0.25, delay: Math.min(index, 6) * 0.06 }}
+      transition={{ duration: 0.25, delay: Math.min(index, 6) * 0.05 }}
       whileHover={{ y: -2 }}
       onMouseMove={handleSpotlight}
       className={`card spotlight attention-card-${level}`}
@@ -48,28 +42,11 @@ export function AttentionCard({ item, index, onMarkReviewed, isMarking }: Attent
       {/* ── Top row ── */}
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div
-            style={{
-              width: 26,
-              height: 26,
-              borderRadius: "50%",
-              background: "var(--clr-surface-2)",
-              border: "1px solid var(--clr-border)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 12,
-              fontWeight: 700,
-              color: "var(--clr-text-muted)",
-              flexShrink: 0,
-            }}
-          >
-            {index + 1}
-          </div>
+          <StockAvatar symbol={item.symbol} companyName={item.company_name} size={38} />
           <div>
             <Link
               href={`/stocks/${item.symbol}`}
-              style={{ fontWeight: 800, fontSize: 17, lineHeight: 1.2, color: "var(--clr-text)", textDecoration: "none" }}
+              style={{ fontWeight: 800, fontSize: 18, lineHeight: 1.2, color: "var(--clr-text)", textDecoration: "none" }}
             >
               {item.symbol}
             </Link>
@@ -96,26 +73,35 @@ export function AttentionCard({ item, index, onMarkReviewed, isMarking }: Attent
 
       {/* ── Price row ── */}
       {item.current_price && (
-        <div>
+        <div style={{ background: "#f8fafc", padding: "12px 16px", borderRadius: "var(--radius-sm)", border: "1px solid var(--clr-border)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 16 }} className="tabular-nums">
-            <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: "-0.03em" }}>
+            <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: "-0.03em", color: "#0f172a" }}>
               ${Number(item.current_price).toFixed(2)}
             </div>
             <div
               className={isUp ? "positive" : "negative"}
-              style={{ display: "flex", alignItems: "center", gap: 4, fontWeight: 700, fontSize: 15 }}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+                fontWeight: 700,
+                fontSize: 14,
+                padding: "2px 8px",
+                borderRadius: 6,
+                background: isUp ? "var(--clr-green-bg)" : "var(--clr-red-bg)",
+              }}
               title={hasSinceChecked ? "Move since you last checked this stock" : "Today's move vs previous close"}
             >
-              {isUp ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
+              {isUp ? <TrendingUp size={15} /> : <TrendingDown size={15} />}
               {isUp ? "+" : ""}{primaryPct.toFixed(2)}%
             </div>
             {item.volume && (
-              <div style={{ color: "var(--clr-text-muted)", fontSize: 12, marginLeft: "auto" }}>
+              <div style={{ color: "var(--clr-text-muted)", fontSize: 12, marginLeft: "auto", fontWeight: 500 }}>
                 Vol: {formatVolume(item.volume)}
               </div>
             )}
           </div>
-          <div style={{ fontSize: 11, color: "var(--clr-text-faint)", marginTop: 3 }}>
+          <div style={{ fontSize: 11, color: "var(--clr-text-faint)", marginTop: 4 }}>
             {hasSinceChecked ? (
               <>Since you checked · Today {(item.price_change_pct ?? 0) >= 0 ? "+" : ""}{(item.price_change_pct ?? 0).toFixed(2)}%</>
             ) : (
@@ -135,34 +121,39 @@ export function AttentionCard({ item, index, onMarkReviewed, isMarking }: Attent
       />
 
       {/* ── Why it matters ── */}
-      <div>
+      <div style={{ background: "#f8fafc", padding: "14px", borderRadius: "var(--radius-sm)", border: "1px solid #e2e8f0" }}>
         <div
           style={{
             fontSize: 11,
-            fontWeight: 700,
+            fontWeight: 800,
             color: "var(--clr-text-muted)",
             textTransform: "uppercase",
             letterSpacing: "0.06em",
             marginBottom: 6,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
           }}
         >
           Why it matters
-        </div>
-        <p style={{ fontSize: 14, lineHeight: 1.6, color: "var(--clr-text)" }}>
-          {item.explanation}
           {item.explanation_source === "llm" && (
             <span
               style={{
-                marginLeft: 8,
+                marginLeft: "auto",
                 fontSize: 10,
                 color: "var(--clr-accent)",
+                background: "rgba(16, 185, 129, 0.12)",
+                padding: "1px 6px",
+                borderRadius: 4,
                 fontWeight: 700,
-                verticalAlign: "middle",
               }}
             >
-              AI
+              AI SYNTHESIS
             </span>
           )}
+        </div>
+        <p style={{ fontSize: 13, lineHeight: 1.6, color: "var(--clr-text)" }}>
+          {item.explanation}
         </p>
       </div>
 
@@ -296,8 +287,6 @@ export function AttentionCard({ item, index, onMarkReviewed, isMarking }: Attent
     </motion.div>
   );
 }
-
-// ── Sub-components ─────────────────────────────────────────────────────────────
 
 function AttentionBadge({ level }: { level: string }) {
   const cls =

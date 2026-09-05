@@ -6,6 +6,7 @@ import { Trash2, Loader2 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { StockSearch } from "@/components/StockSearch";
 import { Sparkline } from "@/components/Sparkline";
+import { StockAvatar } from "@/components/StockAvatar";
 import { useWatchlists } from "@/hooks/useDashboard";
 import { useQuotes } from "@/hooks/useQuotes";
 import { api } from "@/lib/api";
@@ -74,7 +75,7 @@ function WatchlistsContent() {
                 return (
                   <div
                     key={item.id}
-                    className="watchlist-row"
+                    className="hover-row spotlight"
                     style={{
                       display: "flex",
                       alignItems: "center",
@@ -84,18 +85,21 @@ function WatchlistsContent() {
                       borderBottom: "1px solid var(--clr-border)",
                     }}
                   >
-                    <div style={{ minWidth: 0, flexShrink: 0 }}>
-                      <div style={{ fontWeight: 700, fontSize: 14 }}>
-                        {item.symbol.symbol}
-                        {item.symbol.exchange && (
-                          <span className="chip" style={{ marginLeft: 8, fontSize: 10, padding: "2px 8px" }}>
-                            {item.symbol.exchange}
-                          </span>
-                        )}
-                      </div>
-                      <div style={{ fontSize: 12, color: "var(--clr-text-muted)", marginTop: 2 }}>
-                        {item.symbol.company_name}
-                        {item.symbol.sector ? ` · ${item.symbol.sector}` : ""}
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0, flexShrink: 0 }}>
+                      <StockAvatar symbol={item.symbol.symbol} companyName={item.symbol.company_name} size={34} />
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: 14 }}>
+                          {item.symbol.symbol}
+                          {item.symbol.exchange && (
+                            <span className="chip" style={{ marginLeft: 8, fontSize: 10, padding: "2px 8px" }}>
+                              {item.symbol.exchange}
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: 12, color: "var(--clr-text-muted)", marginTop: 2 }}>
+                          {item.symbol.company_name}
+                          {item.symbol.sector ? ` · ${item.symbol.sector}` : ""}
+                        </div>
                       </div>
                     </div>
 

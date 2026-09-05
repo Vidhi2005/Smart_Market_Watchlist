@@ -16,12 +16,13 @@ export function Header({ summary, onTriggerPoll, polling }: HeaderProps) {
   return (
     <header
       style={{
-        background: "rgba(247,245,240,0.85)",
-        backdropFilter: "blur(10px)",
+        background: "rgba(255, 255, 255, 0.92)",
+        backdropFilter: "blur(8px)",
+        WebkitBackdropFilter: "blur(8px)",
         borderBottom: "1px solid var(--clr-border)",
         position: "sticky",
         top: 0,
-        zIndex: 50,
+        zIndex: 35,
       }}
     >
       <div
@@ -29,7 +30,7 @@ export function Header({ summary, onTriggerPoll, polling }: HeaderProps) {
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          height: 68,
+          height: 62,
           padding: "0 24px",
         }}
       >

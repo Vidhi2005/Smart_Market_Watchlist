@@ -71,9 +71,9 @@ function DashboardContent() {
   };
 
   const criticalCount = items.filter((i) => i.attention_level === "CRITICAL").length;
-  const highCount    = items.filter((i) => i.attention_level === "HIGH").length;
-  const watchCount   = items.filter((i) => i.attention_level === "WATCH").length;
-  const hasStale     = items.some((i) => i.data_freshness === "STALE");
+  const highCount = items.filter((i) => i.attention_level === "HIGH").length;
+  const watchCount = items.filter((i) => i.attention_level === "WATCH").length;
+  const hasStale = items.some((i) => i.data_freshness === "STALE");
 
   const watchlistItems = watchlists?.[0]?.items ?? [];
   const flaggedSymbols = new Set(items.map((i) => i.symbol));

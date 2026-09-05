@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { MotionConfig } from "framer-motion";
 import { Header } from "./Header";
 import { Sidebar } from "./Sidebar";
 import { RequireAuth } from "./RequireAuth";
@@ -29,9 +30,13 @@ function ShellInner({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <>
+    // reducedMotion="user" makes every framer-motion animation in the
+    // authenticated app (here and in every child component) automatically
+    // respect the OS-level prefers-reduced-motion setting, without each
+    // component needing its own media-query check.
+    <MotionConfig reducedMotion="user">
       <div className="ambient-bg">
-        <div className="ambient-blob-2" />
+        <div className="ambient-texture" />
       </div>
       <div className="app-content-layer" style={{ display: "flex" }}>
         <Sidebar />
@@ -42,7 +47,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
           </main>
         </div>
       </div>
-    </>
+    </MotionConfig>
   );
 }
 

@@ -25,6 +25,7 @@ export function SystemStatusBadge() {
       title={data ? `API v${data.version} · DB: ${data.db}` : undefined}
     >
       <span
+        className={ok ? "pulse-dot" : undefined}
         style={{
           width: 6,
           height: 6,
