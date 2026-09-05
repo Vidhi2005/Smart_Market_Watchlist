@@ -1,10 +1,46 @@
 # Smart Market Watchlist
 
-**An attention engine for your stock watchlist.** Most watchlists show you
-a price. This one tracks US and Indian equities on their own market
-calendars, scores every move against five weighted signals, and tells you
-what actually changed since you last checked — not just what changed
-today. See [PITCH.md](PITCH.md) for the short version.
+**An attention engine for your stock watchlist.**
+
+## The Pitch
+
+Most watchlists show you a price. This one tells you whether that price
+actually matters. A watchlist's real job is triage, not decoration — so
+every tracked stock (US and Indian equities, each on its own market
+calendar) is scored against five weighted signals — price move, volume,
+relative-to-market move, breakout, news surge — and below-threshold noise
+is filtered out entirely. What's left gets a plain-English explanation
+and a live sparkline, and "since you checked" is a genuine per-user
+baseline (real accounts, not a shared demo fiction), kept distinct from
+"today's move" because they honestly answer different questions.
+
+**How it's designed.** The core bet is a strict split between *global
+market state* (symbols, prices, events — computed once, shared by every
+user tracking that symbol) and *per-user observation state* (your own
+"last checked" baseline). That split is what makes "since you checked"
+possible without duplicating work per user. Market data comes through a
+provider chain that genuinely fails over — live-tested against real
+endpoints, not assumed from documentation — and flags cross-provider
+disagreement instead of silently averaging it away. Explanations (Gemini,
+hallucination-guarded, with a template fallback) are generated once per
+event during background ingestion, never in a user's request — so the
+read path never waits on a provider or an LLM, measured at 30-70ms for
+5-100 stocks, benchmarked rather than claimed.
+
+**The thinking behind the key choices**, in short: real auth because a
+fake per-user baseline would make the whole premise a demo trick; polling
+over WebSockets because the product is "see what changed," not a live
+trading ticker, so the added infrastructure wouldn't buy anything real;
+an event only fires on an actual state transition, not every poll a stock
+stays elevated, because that's the difference between an alert and noise;
+and every resilience claim below is something that was actually tested
+against a live endpoint, not inferred from a pricing page — including the
+provider that got built, verified, and deliberately left switched off
+because its real limits didn't fit the job. The full reasoning for each
+is in [Key Design Decisions](#key-design-decisions) and
+[Provider resilience](#provider-resilience) below.
+
+---
 
 **Contents:** [Architecture](#architecture) ·
 [Core idea: global market state vs. per-user observation](#global-market-state-vs-per-user-observation) ·
