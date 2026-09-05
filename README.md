@@ -12,6 +12,7 @@ without the obvious version of that product.
 [Global vs. user state](#global-market-state-vs-user-observation-state) ·
 [Event lifecycle](#event-lifecycle) ·
 [Provider resilience](#provider-resilience) ·
+[Latency](#latency-no-external-calls-in-the-user-request-path) ·
 [Design decisions](#key-design-decisions) ·
 [Scoring](#scoring-weight-calibration) ·
 [Demo Mode](#demo-mode) ·
@@ -99,11 +100,73 @@ event's own `signals` JSONB for explanation context.
   at all (Finnhub's `/quote` doesn't return one), neither comparable to a
   single day's figure on its own.
 
+### Latency: no external calls in the user request path
+
+In a stock product, "the dashboard is slow" is a trust problem, not a
+cosmetic one. This was audited directly rather than assumed:
+
+**The finding.** `GET /changes` could previously call Gemini synchronously.
+The root cause wasn't a missing queue — it was a data-modeling bug: the
+cached score/confidence/explanation for a market event was keyed by
+`(user_id, event_id)`, even though *none of that content depends on which
+user is asking* — it's a pure function of the event's own signals. The
+practical effect: the first user to view a newly-flagged event paid an
+inline Gemini call, and — worse — the *next* distinct user to view the
+same event paid another one, independently, for an identical explanation
+of an identical event. 10,000 users watching NVDA could mean up to 10,000
+redundant LLM calls for one move, not one.
+
+**The fix.** Explanation generation moved into `run_change_detection`
+(background ingestion, already scheduler-driven) and is stored directly on
+the `MarketEvent.signals` JSONB — once per event, ever. `attention_service
+.get_changes()` is now a pure read: score, confidence, attention level, and
+explanation all come straight off the event row. No LLM call, no external
+provider call, and no per-user duplication is possible in the request path
+— structurally, not by convention.
+
+**Measured, not claimed.** `scripts/benchmark_changes.py` seeds real DB
+rows (bypassing providers/LLM entirely, same as the demo scenario) and
+times `get_changes()` directly for 5/20/50/100-symbol watchlists:
+
+| Symbols | min (ms) | avg (ms) | max (ms) |
+|---|---|---|---|
+| 5   | 28.5 | 31.6 | 35.5 |
+| 20  | 36.2 | 36.9 | 38.4 |
+| 50  | 42.6 | 45.2 | 47.7 |
+| 100 | 56.8 | 67.2 | 72.8 |
+
+Reproducible across repeated runs (see the script's own inline warm-up
+notes on SQLAlchemy/asyncpg statement caching, which otherwise inflates
+whichever size runs first). Growth from 5→100 symbols (20x) is roughly
+2x latency, not 20x — direct evidence the batched-query fix holds under
+load, not just in the common case.
+
+**Adaptive polling.** `useChanges`/`useQuotes` poll at 15s while a relevant
+market is open, backed off to 2 minutes when both US and India are closed
+(no new snapshot is coming outside trading hours). `refetchIntervalInBackground:
+false` means a backgrounded tab doesn't poll at all — set explicitly in
+`layout.tsx`'s `QueryClient` defaults even though it's also the library
+default, so the intent reads clearly in the code.
+
+**Index audit.** Checked every query path in `attention_service`,
+`ingestion_service`, `observation_service`, and `watchlist_service` against
+the existing schema. Result: no new indexes were needed —
+`idx_events_symbol_time` and `idx_news_symbol_time` (both `(symbol_id,
+timestamp DESC)`) already match the batched `IN (...)` query shapes the
+N+1 fix introduced. Documenting "audited, found correct" rather than
+adding indexes with no query to justify them.
+
+**Operational visibility.** `GET /api/health` now reports real ingestion
+counters (last poll duration, symbols processed, provider failures,
+fallback-provider usage, LLM vs. template split) — in-process counters,
+not a metrics platform, but enough to answer "is ingestion actually
+working" from outside the process.
+
 ### Key Design Decisions
 
 | Decision | Rationale |
 |---|---|
-| **Lazy attention scoring** (on read) | Zero computation for inactive users |
+| **Eager scoring + explanation, during ingestion** | Score was always computed at ingestion time; explanation generation used to be lazy (first read) and keyed per-user — both a latency risk and a source of redundant LLM calls (see Latency section). Moved both to ingestion: `GET /changes` is now a pure DB read for every user, always |
 | **Real per-user auth (JWT)** | "What changed since you checked" needs a real per-user baseline, not a shared demo fiction |
 | **Changes vs. Quotes are separate endpoints** | "What changed" (scored, filtered) and "what's the current price" (every tracked stock, always) are different questions — the brief asks for both |
 | **Dynamic ticker resolution** | Adding a company validates and resolves it live against the provider instead of only matching a pre-seeded catalog |
@@ -222,9 +285,11 @@ backend/
 │   │   └── yfinance_provider.py     # NSE/BSE — same interface, no API key needed
 │   │
 │   ├── services/
-│   │   ├── ingestion_service.py     # Poll + change detection + provider fallback
-│   │   ├── attention_service.py     # Core "what changed?" pipeline (batched queries)
-│   │   ├── explanation_service.py   # LLM + fallback + hallucination guard
+│   │   ├── ingestion_service.py     # Poll + change detection + provider fallback +
+│   │   │                            # eager scoring/explanation (see Latency)
+│   │   ├── attention_service.py     # Core "what changed?" pipeline — pure DB read
+│   │   ├── explanation_service.py   # LLM + fallback + hallucination guard (called
+│   │   │                            # from ingestion, never from a user request)
 │   │   ├── observation_service.py   # Per-user baseline management
 │   │   ├── watchlist_service.py     # CRUD + live ticker resolution + conflict check
 │   │   └── demo_service.py          # Deterministic "you were away" scenario
@@ -239,7 +304,8 @@ backend/
 │       └── jobs.py                  # APScheduler — polls whenever either market is open
 │
 ├── scripts/
-│   └── schema.sql, seed.py, pull_live_data.py   # one-shot manual data pull
+│   ├── schema.sql, seed.py, pull_live_data.py   # one-shot manual data pull
+│   └── benchmark_changes.py         # real latency measurement (see Latency)
 │
 └── tests/
     └── test_signals.py, test_scoring.py, test_fallback.py, test_ingestion.py, conftest.py
@@ -267,6 +333,13 @@ cd backend
 pytest -v
 ```
 
+To reproduce the latency numbers in the [Latency](#latency-no-external-calls-in-the-user-request-path)
+section against your own machine/DB (requires the containers from Quick
+Start step 1 running):
+```bash
+python scripts/benchmark_changes.py
+```
+
 ---
 
 ## API Reference
@@ -277,7 +350,7 @@ pytest -v
 | POST | `/api/auth/login` | — | Returns a JWT |
 | GET | `/api/auth/me` | ✓ | Current user |
 | PATCH | `/api/auth/me` | ✓ | Update display name / country / timezone |
-| GET | `/api/health` | — | Health check (DB connectivity) |
+| GET | `/api/health` | — | Health check (DB connectivity) + real ingestion counters (last poll duration, symbols processed, provider failures, LLM/template split) |
 | GET | `/api/watchlists` | ✓ | List the user's watchlists |
 | POST | `/api/watchlists` | ✓ | Create a watchlist |
 | GET | `/api/watchlists/{id}/changes` | ✓ | **What changed** — ranked, scored attention items |
@@ -320,3 +393,5 @@ Deliberate scope cuts, not oversights:
 - **Conflict detection runs at ticker-resolution time, not on every poll** — a deliberate cost/benefit call, not an oversight (see Provider resilience above); it's a real, exercised code path, just not continuous.
 - **No DB-fixture test infrastructure** — the existing suite is pure-function unit tests (signals, scoring, event lifecycle, hallucination guard, volume-baseline selection); N+1 batching, provider fallback, and the demo scenario are verified via live API calls rather than automated DB-backed tests.
 - **`CONFLICTING`/`INVALID` quality statuses exist in the schema but aren't wired into every ingestion path** — `INVALID` in particular (rejecting malformed provider data outright) isn't implemented; providers currently already reject on missing/non-positive price before ever constructing a `QuoteData`, which covers the common case but isn't the same as a first-class rejection path.
+- **`user_attention` is a vestigial table** — moving score/explanation onto `MarketEvent.signals` (see Latency) made it obsolete, but `schema.sql` still creates it. Left in place deliberately rather than risk a destructive migration for a hackathon-scope database; no application code reads or writes it anymore.
+- **No ESLint config for the frontend** — `next lint` has never been run through its initial setup in this project; a pre-existing gap, not introduced by this pass.
