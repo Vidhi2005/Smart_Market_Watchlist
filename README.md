@@ -51,8 +51,7 @@ is in [Key Design Decisions](#key-design-decisions) and
 [Demo Mode](#demo-mode) ·
 [Quick Start](#quick-start) ·
 [Project Structure](#project-structure) ·
-[API Reference](#api-reference) ·
-[Known Limitations](#known-limitations)
+[API Reference](#api-reference)
 
 ---
 
@@ -179,6 +178,8 @@ when both are closed, and stop entirely on a backgrounded tab.
 | **Polling, not WebSockets** | The product is "see what changed," not a live trading ticker — polling matches that without added infrastructure |
 | **Batched attention queries** | A fixed handful of queries per request regardless of watchlist size |
 | **Timezone-aware timestamps everywhere** | A naive UTC default silently gets reinterpreted as local time by this stack — fixed at the model layer |
+| **One watchlist surfaced per user** | The schema supports more, but the product's actual job — triage what changed — doesn't need multi-watchlist juggling to prove the idea |
+| **Conflict detection at ticker-add time, not continuous** | Cross-checking every provider on every poll would double ongoing API calls against free-tier limits for a check that matters once, at resolution time, not every 45 seconds |
 
 ## Scoring
 
@@ -271,21 +272,3 @@ frontend/src/
 | POST | `/api/observations/commit` | Advance "last checked" baseline |
 | GET | `/api/dashboard` | Per-user summary + market hours |
 | POST | `/api/admin/demo-scenario` | Seed the demo scenario |
-
----
-
-## Known Limitations
-
-Deliberate scope cuts:
-
-- Single watchlist surfaced in the UI (schema supports more).
-- No WebSocket push — polling fits this product's actual shape.
-- No password reset / email verification.
-- Conflict detection runs at ticker-add time, not continuously (would
-  double ongoing API calls against free-tier limits for marginal gain).
-- No DB-fixture test infra — tests are pure-function and mocked-provider
-  unit tests; N+1 batching and the demo scenario are verified via live
-  API calls instead.
-- `CONFLICTING`/`INVALID` quality statuses exist in the schema but aren't
-  wired into every path yet.
-- No ESLint config on the frontend.
