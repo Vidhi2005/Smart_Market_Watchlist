@@ -20,6 +20,23 @@ class Settings(BaseSettings):
     # ── Market Data ───────────────────────────────────────────────────────────
     finnhub_api_key: str = ""
     benchmark_symbol: str = "SPY"
+    # Optional secondary providers — empty key means "not configured," and a
+    # provider absent from its market's chain below is simply never called
+    # regardless of whether a key exists for it (having a key only makes a
+    # provider *available*, never automatically active — see ingestion_service).
+    alpha_vantage_api_key: str = ""
+    twelve_data_api_key: str = ""
+    # Comma-separated provider names, tried in order. Twelve Data is verified
+    # (live-tested) to return real US quotes on a workable free-tier budget
+    # (800/day, 8/min) — added as a real secondary. Alpha Vantage's free tier
+    # is 25 requests/day total, live-confirmed — nowhere near enough to sit in
+    # an active polling fallback path, so it's built and testable but not
+    # wired into either chain. Twelve Data's NSE/BSE data is live-confirmed to
+    # be paywalled on the free tier ("available starting with the Grow or
+    # Venture plan"), so it is NOT in the India chain — yfinance stays India's
+    # only provider.
+    us_provider_chain: str = "finnhub,twelve_data,yfinance"
+    india_provider_chain: str = "yfinance"
 
     # ── LLM ───────────────────────────────────────────────────────────────────
     gemini_api_key: str = ""

@@ -12,6 +12,8 @@ from app.models import User
 from app.schemas import (
     AddSymbolRequest,
     CandlesResponse,
+    ProviderConflictOut,
+    SymbolOut,
     SymbolSearchResult,
     WatchlistCreate,
     WatchlistItemOut,
@@ -77,7 +79,7 @@ async def add_symbol(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    item = await watchlist_service.add_symbol_to_watchlist(
+    item, provider_conflict = await watchlist_service.add_symbol_to_watchlist(
         db, watchlist_id, current_user.id, payload.symbol
     )
     if not item:
@@ -91,7 +93,16 @@ async def add_symbol(
     from app.services.ingestion_service import bootstrap_historical
     asyncio.create_task(bootstrap_historical(item.symbol.id, item.symbol.symbol))
 
-    return item
+    # Explicitly constructed (not just `return item`): provider_conflict is
+    # ephemeral, produced only by this request's resolution flow, and isn't
+    # an attribute on the WatchlistItem ORM object — FastAPI's automatic
+    # response_model serialization has nothing to pull it from otherwise.
+    return WatchlistItemOut(
+        id=item.id,
+        symbol=SymbolOut.model_validate(item.symbol),
+        added_at=item.added_at,
+        provider_conflict=ProviderConflictOut(**provider_conflict) if provider_conflict else None,
+    )
 
 
 @router.delete("/{watchlist_id}/symbols/{symbol_id}", status_code=status.HTTP_204_NO_CONTENT)

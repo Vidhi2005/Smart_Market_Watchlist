@@ -71,10 +71,32 @@ class WatchlistCreate(BaseModel):
 
 
 
+class ProviderOutlierOut(BaseModel):
+    provider: str
+    price: float
+    diff_pct: float
+
+
+class ProviderConflictOut(BaseModel):
+    """
+    Only ever present on the response to adding a brand-new ticker — a
+    one-time, symbol-resolution-time cross-provider check, not a
+    persistent or continuously-recomputed field. Absent (None) means
+    either the symbol already existed (no new provider call made) or
+    every provider checked agreed within tolerance.
+    """
+    providers_checked: int
+    canonical_provider: str
+    canonical_price: float
+    conflicting: bool
+    outliers: List[ProviderOutlierOut]
+
+
 class WatchlistItemOut(OrmBase):
     id: str
     symbol: SymbolOut
     added_at: datetime
+    provider_conflict: Optional[ProviderConflictOut] = None
 
 
 class WatchlistOut(OrmBase):
@@ -216,6 +238,7 @@ class IngestionStats(BaseModel):
     last_poll_symbols_processed: int = 0
     last_poll_provider_failures: int = 0
     last_poll_fallback_used: int = 0
+    provider_failures: dict[str, int] = {}
     llm_calls_total: int = 0
     llm_fallback_total: int = 0
 

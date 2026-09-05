@@ -64,41 +64,81 @@ async def delete_watchlist(db: AsyncSession, watchlist_id: str, user_id: str) ->
     return True
 
 
-async def _resolve_new_symbol(db: AsyncSession, ticker: str) -> Symbol | None:
+def detect_price_conflict(
+    canonical_price: float, other_price: float, tolerance_pct: float = _CONFLICT_TOLERANCE_PCT
+) -> float | None:
+    """
+    Pure comparison, no I/O — returns the disagreement percentage when it
+    exceeds tolerance, else None. Kept separate from the async resolution
+    flow so it's directly unit-testable without a DB or network call.
+    """
+    if canonical_price <= 0:
+        return None
+    diff_pct = abs(canonical_price - other_price) / canonical_price * 100
+    return diff_pct if diff_pct > tolerance_pct else None
+
+
+async def _check_provider_conflicts(ticker: str, canonical_quote) -> dict | None:
+    """
+    Cross-checks the canonical quote (the one that resolved the symbol)
+    against every OTHER provider configured for this ticker's market —
+    still a one-time, symbol-add-time check, not continuous (doubling
+    per-poll API calls against free-tier ceilings for marginal benefit
+    is the wrong tradeoff regardless of how many providers exist).
+    Compares against a single canonical reference rather than every pair,
+    since that's what a user-facing message actually needs to say ("X
+    disagrees with the value we used"), not a full disagreement matrix.
+    """
+    from app.services.ingestion_service import _chain_for
+
+    canonical_price = float(canonical_quote.price)
+    outliers: list[dict] = []
+    checked = 1  # the canonical provider itself counts as checked
+
+    for name, provider in _chain_for(ticker):
+        if name == canonical_quote.source:
+            continue
+        other_quote = await provider.get_quote(ticker)
+        if not other_quote:
+            continue
+        checked += 1
+        diff_pct = detect_price_conflict(canonical_price, float(other_quote.price))
+        if diff_pct is not None:
+            logger.warning(
+                "Provider conflict resolving %s: %s=%.2f vs %s=%.2f (%.1f%% apart)",
+                ticker, canonical_quote.source, canonical_price, name, float(other_quote.price), diff_pct,
+            )
+            outliers.append({"provider": name, "price": float(other_quote.price), "diff_pct": round(diff_pct, 2)})
+
+    if not outliers:
+        return None
+    return {
+        "providers_checked": checked,
+        "canonical_provider": canonical_quote.source,
+        "canonical_price": canonical_price,
+        "conflicting": True,
+        "outliers": outliers,
+    }
+
+
+async def _resolve_new_symbol(db: AsyncSession, ticker: str) -> tuple[Symbol | None, dict | None]:
     """
     Looks up a ticker that isn't in the local catalog yet via the live
-    provider — Finnhub for US/global tickers, yfinance for .NS/.BO — instead
-    of only ever offering the ~20 pre-seeded symbols. A real quote confirms
-    the ticker exists; the resolved row is persisted so future searches (and
-    other users) find it locally without another live lookup.
+    provider chain instead of only ever offering the ~20 pre-seeded
+    symbols. A real quote confirms the ticker exists; the resolved row is
+    persisted so future searches (and other users) find it locally
+    without another live lookup. Returns (symbol, provider_conflict) —
+    the second value is None unless another configured provider's price
+    disagreed with the one actually used beyond tolerance.
     """
-    from app.services.ingestion_service import _INDIAN_SUFFIXES, get_provider
+    from app.services.ingestion_service import get_provider
 
     provider = get_provider(ticker)
     quote = await provider.get_quote(ticker)
     if not quote:
-        return None  # not a real/quotable ticker
+        return None, None  # not a real/quotable ticker
 
-    # Real (if narrowly-scoped) conflict detection: this is the one place a
-    # symbol gets freshly resolved, so it's a cheap, low-frequency point to
-    # cross-check a second provider — unlike doing this on every poll, which
-    # would double the ongoing API cost for continuous coverage that isn't
-    # needed here. yfinance covers non-Indian tickers too, so it doubles as
-    # a free secondary source purely for this one-time check.
-    if not ticker.upper().endswith(_INDIAN_SUFFIXES):
-        from app.providers.yfinance_provider import YFinanceProvider
-
-        secondary_quote = await YFinanceProvider().get_quote(ticker)
-        if secondary_quote:
-            primary_price = float(quote.price)
-            secondary_price = float(secondary_quote.price)
-            if primary_price > 0:
-                diff_pct = abs(primary_price - secondary_price) / primary_price * 100
-                if diff_pct > _CONFLICT_TOLERANCE_PCT:
-                    logger.warning(
-                        "Provider conflict resolving %s: %s=%.2f vs yfinance=%.2f (%.1f%% apart)",
-                        ticker, quote.source, primary_price, secondary_price, diff_pct,
-                    )
+    conflict = await _check_provider_conflicts(ticker, quote)
 
     company_name = await provider.get_company_name(ticker)
     exchange = "NSE" if ticker.endswith(".NS") else "BSE" if ticker.endswith(".BO") else None
@@ -112,16 +152,23 @@ async def _resolve_new_symbol(db: AsyncSession, ticker: str) -> Symbol | None:
     db.add(sym)
     await db.commit()
     await db.refresh(sym)
-    return sym
+    return sym, conflict
 
 
 async def add_symbol_to_watchlist(
     db: AsyncSession, watchlist_id: str, user_id: str, ticker: str
-) -> WatchlistItem | None:
-    """Add a symbol (by ticker string) to a watchlist. Returns None if not found."""
+) -> tuple[WatchlistItem | None, dict | None]:
+    """
+    Add a symbol (by ticker string) to a watchlist. Returns
+    (item, provider_conflict) — item is None if not found/resolvable.
+    provider_conflict is only ever non-None when resolving a brand-new
+    ticker triggered a live cross-provider check that disagreed beyond
+    tolerance (see `_check_provider_conflicts`); an already-catalogued
+    symbol has nothing to report since no new provider call was made.
+    """
     wl = await get_watchlist(db, watchlist_id, user_id)
     if not wl:
-        return None
+        return None, None
 
     ticker = ticker.strip().upper()
 
@@ -129,10 +176,11 @@ async def add_symbol_to_watchlist(
     # live provider lookup for tickers nobody has added yet.
     sym_result = await db.execute(select(Symbol).where(Symbol.symbol == ticker))
     sym = sym_result.scalar_one_or_none()
+    conflict: dict | None = None
     if not sym:
-        sym = await _resolve_new_symbol(db, ticker)
+        sym, conflict = await _resolve_new_symbol(db, ticker)
     if not sym:
-        return None
+        return None, None
 
     # Idempotent insert
     existing = await db.execute(
@@ -151,7 +199,7 @@ async def add_symbol_to_watchlist(
             )
             .options(selectinload(WatchlistItem.symbol))
         )
-        return result2.scalar_one_or_none()
+        return result2.scalar_one_or_none(), conflict
 
     item = WatchlistItem(watchlist_id=watchlist_id, symbol_id=sym.id)
     db.add(item)
@@ -172,7 +220,7 @@ async def add_symbol_to_watchlist(
         .where(WatchlistItem.id == item.id)
         .options(selectinload(WatchlistItem.symbol))
     )
-    return result3.scalar_one_or_none()
+    return result3.scalar_one_or_none(), conflict
 
 
 async def remove_symbol_from_watchlist(

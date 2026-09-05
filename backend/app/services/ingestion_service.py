@@ -19,7 +19,9 @@ from app.engine import signals as sig
 from app.engine.scoring import RawSignals, classify_transition, score, should_create_event
 from app.models import MarketEvent, MarketSnapshot, Symbol, UserObservation
 from app.providers.base import MarketDataProvider, QuoteData
+from app.providers.alpha_vantage_provider import AlphaVantageProvider
 from app.providers.finnhub_provider import FinnhubProvider
+from app.providers.twelve_data_provider import TwelveDataProvider
 from app.providers.yfinance_provider import YFinanceProvider
 from app.services.explanation_service import generate_event_explanation
 
@@ -35,6 +37,11 @@ ingestion_stats = {
     "last_poll_symbols_processed": 0,
     "last_poll_provider_failures": 0,
     "last_poll_fallback_used": 0,
+    # Per-provider failure counts, keyed by provider name (only providers
+    # actually configured in a chain ever appear here) — e.g.
+    # {"finnhub": 2, "twelve_data": 0}. Lets /api/health show which
+    # specific provider is having trouble, not just an aggregate count.
+    "provider_failures": {},
     "llm_calls_total": 0,
     "llm_fallback_total": 0,
 }
@@ -44,58 +51,77 @@ ingestion_stats = {
 # .BO = BSE (Bombay Stock Exchange)
 _INDIAN_SUFFIXES = (".NS", ".BO")
 
-_finnhub_provider: FinnhubProvider | None = None
-_yfinance_provider: YFinanceProvider | None = None
+# Lazily-constructed, cached by name — a provider whose API key isn't
+# configured resolves to None once and stays that way (no key won't
+# suddenly appear at runtime), so it's simply never tried again.
+_provider_instances: dict[str, MarketDataProvider | None] = {}
+
+
+def _get_named_provider(name: str) -> MarketDataProvider | None:
+    if name in _provider_instances:
+        return _provider_instances[name]
+
+    provider: MarketDataProvider | None
+    if name == "finnhub":
+        provider = FinnhubProvider(settings.finnhub_api_key) if settings.finnhub_api_key else None
+    elif name == "yfinance":
+        provider = YFinanceProvider()  # no key needed, always available
+    elif name == "alpha_vantage":
+        provider = AlphaVantageProvider(settings.alpha_vantage_api_key) if settings.alpha_vantage_api_key else None
+    elif name == "twelve_data":
+        provider = TwelveDataProvider(settings.twelve_data_api_key) if settings.twelve_data_api_key else None
+    else:
+        logger.error("Unknown provider name %r in a configured chain — check settings", name)
+        provider = None
+
+    _provider_instances[name] = provider
+    return provider
+
+
+def _chain_for(symbol: str) -> list[tuple[str, MarketDataProvider]]:
+    """Ordered (name, provider) pairs configured for this symbol's market,
+    skipping any entry whose provider isn't available (unknown name, or a
+    key-requiring provider with no key configured). Having a key set does
+    NOT imply a provider is in the chain — only actually listing it in
+    `us_provider_chain`/`india_provider_chain` does."""
+    raw = settings.india_provider_chain if symbol.upper().endswith(_INDIAN_SUFFIXES) else settings.us_provider_chain
+    names = [n.strip() for n in raw.split(",") if n.strip()]
+    chain: list[tuple[str, MarketDataProvider]] = []
+    for name in names:
+        provider = _get_named_provider(name)
+        if provider is not None:
+            chain.append((name, provider))
+    return chain
 
 
 def get_provider(symbol: str = "") -> MarketDataProvider:
-    """Return the right provider for the given ticker symbol.
+    """The primary (first-in-chain) provider for this symbol's market —
+    used by call sites that only need one provider (company-name lookup,
+    news, historical bootstrap), not the full fallback chain."""
+    chain = _chain_for(symbol)
+    if chain:
+        return chain[0][1]
+    # Sane configs always resolve at least one provider (yfinance needs no
+    # key), but never return None from a function typed to return one.
+    return _get_named_provider("yfinance")  # type: ignore[return-value]
 
-    - Symbols ending in .NS or .BO  →  YFinanceProvider (free, no key needed)
-    - Everything else               →  FinnhubProvider  (US/global markets)
+
+async def get_quote_with_fallback_chain(symbol: str) -> tuple[QuoteData | None, list[str]]:
     """
-    global _finnhub_provider, _yfinance_provider
-    if symbol.upper().endswith(_INDIAN_SUFFIXES):
-        if _yfinance_provider is None:
-            _yfinance_provider = YFinanceProvider()
-        return _yfinance_provider
-    else:
-        if _finnhub_provider is None:
-            _finnhub_provider = FinnhubProvider(settings.finnhub_api_key)
-        return _finnhub_provider
-
-
-def _fallback_provider(symbol: str) -> MarketDataProvider | None:
-    """The secondary provider to try if the primary fails, or None if there
-    isn't a sensible one. Indian symbols already use the only provider that
-    covers NSE/BSE, so there's no fallback for them — yfinance, unlike
-    Finnhub, has no API key requirement and covers global tickers, so it
-    doubles as a free fallback for everything else."""
-    global _yfinance_provider
-    if symbol.upper().endswith(_INDIAN_SUFFIXES):
-        return None
-    if _yfinance_provider is None:
-        _yfinance_provider = YFinanceProvider()
-    return _yfinance_provider
-
-
-async def get_quote_with_fallback(symbol: str) -> tuple[QuoteData | None, bool]:
+    Tries each provider configured for this symbol's market, in order,
+    stopping at the first success. Returns (quote, names_tried) — the
+    list always contains every provider actually attempted, so a caller
+    can tell not just success/failure but which provider supplied the
+    data, or that the whole chain was exhausted.
     """
-    Fetches a quote via the primary provider, falling back to a secondary
-    provider on failure. Returns (quote, used_fallback).
-    """
-    primary = get_provider(symbol)
-    quote = await primary.get_quote(symbol)
-    if quote:
-        return quote, False
-
-    fallback = _fallback_provider(symbol)
-    if not fallback:
-        return None, False
-
-    logger.warning("Primary provider failed for %s — trying fallback", symbol)
-    quote = await fallback.get_quote(symbol)
-    return quote, quote is not None
+    tried: list[str] = []
+    for name, provider in _chain_for(symbol):
+        tried.append(name)
+        quote = await provider.get_quote(symbol)
+        if quote:
+            return quote, tried
+        logger.warning("%s failed for %s — trying next provider in chain", name, symbol)
+    return None, tried
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -318,9 +344,15 @@ async def poll_market_data() -> None:
 
         for symbol in symbols:
             try:
-                quote, used_fallback = await get_quote_with_fallback(symbol.symbol)
-                if used_fallback:
-                    logger.info("Used fallback provider for %s", symbol.symbol)
+                quote, tried = await get_quote_with_fallback_chain(symbol.symbol)
+                succeeded_name = tried[-1] if (quote and tried) else None
+                for name in tried:
+                    if name != succeeded_name:
+                        ingestion_stats["provider_failures"][name] = (
+                            ingestion_stats["provider_failures"].get(name, 0) + 1
+                        )
+                if len(tried) > 1:
+                    logger.info("Used fallback chain for %s: tried %s", symbol.symbol, tried)
                     fallback_used += 1
                 if not quote:
                     provider_failures += 1

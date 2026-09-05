@@ -61,6 +61,14 @@ export interface SymbolSearchResult {
   exchange: string | null;
 }
 
+export interface ProviderConflictOut {
+  providers_checked: number;
+  canonical_provider: string;
+  canonical_price: number;
+  conflicting: boolean;
+  outliers: { provider: string; price: number; diff_pct: number }[];
+}
+
 export interface WatchlistItemOut {
   id: string;
   symbol: {
@@ -71,6 +79,9 @@ export interface WatchlistItemOut {
     exchange: string | null;
   };
   added_at: string;
+  // Only ever present on the response to adding a brand-new ticker — a
+  // one-time cross-provider check, not a persistent field.
+  provider_conflict?: ProviderConflictOut | null;
 }
 
 export interface WatchlistOut {

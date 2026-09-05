@@ -16,6 +16,7 @@ export function StockSearch({ watchlistId, onAdded }: Props) {
   const [loading, setLoading] = useState(false);
   const [adding, setAdding] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [conflictNote, setConflictNote] = useState<string | null>(null);
 
   const search = useCallback(async (q: string) => {
     if (q.length < 1) { setResults([]); return; }
@@ -39,8 +40,20 @@ export function StockSearch({ watchlistId, onAdded }: Props) {
   const handleAdd = async (symbol: string) => {
     setAdding(symbol);
     setError(null);
+    setConflictNote(null);
     try {
-      await api.addSymbol(watchlistId, symbol);
+      const item = await api.addSymbol(watchlistId, symbol);
+      const conflict = item.provider_conflict;
+      if (conflict && conflict.outliers.length > 0) {
+        // Deliberately not "incorrect data detected" — a price
+        // difference can come from timestamp/feed skew, not necessarily
+        // either provider being wrong, so this only ever states the
+        // disagreement and which value was used, not a verdict.
+        const o = conflict.outliers[0];
+        setConflictNote(
+          `Note: ${conflict.canonical_provider} and ${o.provider} differ by ${o.diff_pct.toFixed(1)}% on this price — using ${conflict.canonical_provider}'s value.`
+        );
+      }
       setQuery("");
       setResults([]);
       onAdded?.();
@@ -190,6 +203,12 @@ export function StockSearch({ watchlistId, onAdded }: Props) {
       {error && (
         <div style={{ marginTop: 8, color: "var(--clr-critical)", fontSize: 12 }}>
           {error}
+        </div>
+      )}
+
+      {conflictNote && (
+        <div style={{ marginTop: 8, color: "var(--clr-text-muted)", fontSize: 12 }}>
+          {conflictNote}
         </div>
       )}
     </div>

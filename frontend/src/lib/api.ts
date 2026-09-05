@@ -58,6 +58,7 @@ import type {
   QuoteOut,
   SymbolSearchResult,
   User,
+  WatchlistItemOut,
   WatchlistOut,
 } from "./types";
 
@@ -93,7 +94,7 @@ export const api = {
     apiFetch<QuoteOut[]>(`/api/watchlists/${watchlistId}/quotes`),
 
   addSymbol: (watchlistId: string, symbol: string) =>
-    apiFetch(`/api/watchlists/${watchlistId}/symbols`, {
+    apiFetch<WatchlistItemOut>(`/api/watchlists/${watchlistId}/symbols`, {
       method: "POST",
       body: JSON.stringify({ symbol }),
     }),

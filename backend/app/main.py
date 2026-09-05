@@ -21,6 +21,13 @@ logging.basicConfig(
     level=getattr(logging, settings.log_level.upper(), logging.INFO),
     format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
 )
+# httpx's own request logger logs full URLs at INFO level, query string
+# included — every provider adapter passes its API key as a query param
+# (Finnhub's `token=`, Twelve Data's `apikey=`, Alpha Vantage's
+# `apikey=`), so this was silently writing every key to the log file on
+# every single request. WARNING still surfaces genuine httpx-level
+# problems without echoing request URLs.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 
