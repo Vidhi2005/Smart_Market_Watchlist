@@ -6,7 +6,23 @@ import { useState } from "react";
 import { AuthProvider } from "@/context/AuthContext";
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
-  const [queryClient] = useState(() => new QueryClient());
+  const [queryClient] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: {
+            // Explicit, not just relying on the library default, so intent
+            // reads clearly here: don't burn polling cycles on a
+            // backgrounded tab (this IS the v5 default, restated on
+            // purpose), and retry transient network failures with backoff
+            // rather than failing a poll tick outright.
+            refetchIntervalInBackground: false,
+            retry: 2,
+            retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 10_000),
+          },
+        },
+      })
+  );
 
   return (
     <html lang="en">

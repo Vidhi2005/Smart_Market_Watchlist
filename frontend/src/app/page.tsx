@@ -23,9 +23,13 @@ function DashboardContent() {
   const { data: watchlists } = useWatchlists();
   const watchlistId = watchlists?.[0]?.id ?? null;
 
-  const { data: changes, isLoading, error } = useChanges(watchlistId);
-  const { data: quotes, isLoading: quotesLoading } = useQuotes(watchlistId);
   const { data: dashboard } = useDashboard();
+  // Default true (normal cadence) until we actually know a market's
+  // closed — never silently under-poll before the first dashboard load.
+  const marketOpen = dashboard ? dashboard.us_market_open || dashboard.indian_market_open : true;
+
+  const { data: changes, isLoading, error } = useChanges(watchlistId, marketOpen);
+  const { data: quotes, isLoading: quotesLoading } = useQuotes(watchlistId, marketOpen);
   const commitMutation = useCommitObservations(watchlistId ?? "");
 
   const [polling, setPolling] = useState(false);
