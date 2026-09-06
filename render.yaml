@@ -15,6 +15,12 @@ services:
     envVars:
       - key: ENVIRONMENT
         value: production
+      # Render's default Python (3.14) has no prebuilt pydantic-core wheel
+      # for this pinned pydantic version, forcing a from-source Rust build
+      # that fails in Render's build sandbox. 3.12 has prebuilt wheels for
+      # every dependency here — no dependency versions need to change.
+      - key: PYTHON_VERSION
+        value: "3.12.10"
       - key: DATABASE_URL
         fromDatabase:
           name: smart-market-watchlist-db
