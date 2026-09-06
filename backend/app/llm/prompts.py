@@ -16,6 +16,12 @@ def build_explanation_prompt(
     current_price: float,
     event_type: str,
 ) -> str:
+    # Defensive truncation matching the Symbol table's own column limits
+    # (String(20)/String(255)) — these values are provider-sourced, not
+    # directly user-typed, but this keeps the prompt bounded regardless.
+    symbol = symbol[:20]
+    company_name = company_name[:255]
+
     return f"""You are a concise financial analyst writing a one-sentence explanation (max 35 words) for a retail investor's watchlist alert.
 
 Stock: {symbol} ({company_name})

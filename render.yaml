@@ -1,0 +1,40 @@
+services:
+  - type: web
+    name: smart-market-watchlist-api
+    runtime: python
+    plan: free
+    region: oregon
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    # Exactly one process, no --workers N and no autoscaling — APScheduler
+    # runs in-process with no cross-instance coordination, so a second
+    # worker/instance would silently double every provider poll. See the
+    # security report's deployment constraint.
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: smart-market-watchlist-db
+          property: connectionString
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: FRONTEND_ORIGIN
+        sync: false
+      - key: FINNHUB_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: ALPHA_VANTAGE_API_KEY
+        sync: false
+      - key: TWELVE_DATA_API_KEY
+        sync: false
+      - key: ADMIN_EMAILS
+        sync: false
+
+databases:
+  - name: smart-market-watchlist-db
+    plan: free
+    region: oregon

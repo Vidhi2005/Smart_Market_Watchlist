@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+from app.middleware.security_headers import BodySizeLimitMiddleware, SecurityHeadersMiddleware
 from app.routers.auth import router as auth_router
 from app.routers.dashboard import router as dashboard_router
 from app.routers.health import router as health_router
@@ -48,13 +49,29 @@ app = FastAPI(
     description="AI-powered attention engine for your stock watchlist.",
     version="1.0.0",
     lifespan=lifespan,
+    docs_url="/docs" if settings.docs_enabled else None,
+    redoc_url="/redoc" if settings.docs_enabled else None,
+    openapi_url="/openapi.json" if settings.docs_enabled else None,
 )
 
+# ── Security headers / body size ────────────────────────────────────────────────
+app.add_middleware(BodySizeLimitMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
+
 # ── CORS ──────────────────────────────────────────────────────────────────────
+# Starlette's CORSMiddleware only does exact-string matching — the previous
+# "https://*.vercel.app" entry was a silent no-op, not a broad wildcard;
+# the real deployed frontend origin must be set explicitly via
+# FRONTEND_ORIGIN. allow_credentials is False because the frontend
+# authenticates via an Authorization header only, never cookies.
+_allow_origins = ["http://localhost:3000"]
+if settings.frontend_origin:
+    _allow_origins.append(settings.frontend_origin)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "https://*.vercel.app"],
-    allow_credentials=True,
+    allow_origins=_allow_origins,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

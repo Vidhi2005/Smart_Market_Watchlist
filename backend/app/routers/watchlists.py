@@ -3,10 +3,11 @@ Watchlist + Stock routers.
 """
 import asyncio
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user
+from app.config import settings
 from app.database import get_db
 from app.models import User
 from app.schemas import (
@@ -20,6 +21,7 @@ from app.schemas import (
     WatchlistOut,
 )
 from app.services import watchlist_service
+from app.utils.rate_limit import check_rate_limit
 
 router = APIRouter(prefix="/api/watchlists", tags=["watchlists"])
 stock_router = APIRouter(prefix="/api/stocks", tags=["stocks"])
@@ -79,6 +81,15 @@ async def add_symbol(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # A never-before-seen ticker can cost up to ~4 live provider calls
+    # (canonical quote + conflict-check against every other chain provider
+    # + company name) plus a candles bootstrap call below — bound how often
+    # one user can trigger that fan-out.
+    check_rate_limit(
+        f"add_symbol:{current_user.id}",
+        settings.rate_limit_add_symbol_max,
+        settings.rate_limit_add_symbol_window_seconds,
+    )
     item, provider_conflict = await watchlist_service.add_symbol_to_watchlist(
         db, watchlist_id, current_user.id, payload.symbol
     )
@@ -122,10 +133,15 @@ async def remove_symbol(
 # ── Stock search ──────────────────────────────────────────────────────────────
 
 @stock_router.get("/search", response_model=list[SymbolSearchResult])
-async def search_stocks(q: str = "", db: AsyncSession = Depends(get_db)):
+async def search_stocks(request: Request, q: str = "", db: AsyncSession = Depends(get_db)):
     if len(q) < 1:
         return []
-    symbols = await watchlist_service.search_symbols(db, q)
+    check_rate_limit(
+        f"search:{request.client.host if request.client else 'unknown'}",
+        settings.rate_limit_search_max,
+        settings.rate_limit_search_window_seconds,
+    )
+    symbols = await watchlist_service.search_symbols(db, q[:100])
     return [
         SymbolSearchResult(
             symbol=s.symbol,

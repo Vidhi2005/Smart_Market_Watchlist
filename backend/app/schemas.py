@@ -7,7 +7,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional, Any, List, Dict
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ── Shared ────────────────────────────────────────────────────────────────────
@@ -26,22 +26,22 @@ class UserOut(OrmBase):
 
 
 class SignupRequest(BaseModel):
-    email: str
-    password: str
-    display_name: str
-    country: Optional[str] = None
-    timezone: Optional[str] = None
+    email: str = Field(max_length=255)
+    password: str = Field(min_length=8, max_length=128)
+    display_name: str = Field(min_length=1, max_length=100)
+    country: Optional[str] = Field(default=None, max_length=100)
+    timezone: Optional[str] = Field(default=None, max_length=50)
 
 
 class LoginRequest(BaseModel):
-    email: str
-    password: str
+    email: str = Field(max_length=255)
+    password: str = Field(max_length=128)
 
 
 class UpdateProfileRequest(BaseModel):
-    display_name: Optional[str] = None
-    country: Optional[str] = None
-    timezone: Optional[str] = None
+    display_name: Optional[str] = Field(default=None, max_length=100)
+    country: Optional[str] = Field(default=None, max_length=100)
+    timezone: Optional[str] = Field(default=None, max_length=50)
 
 
 class TokenResponse(BaseModel):
@@ -67,7 +67,7 @@ class SymbolSearchResult(BaseModel):
 
 # ── Watchlist ─────────────────────────────────────────────────────────────────
 class WatchlistCreate(BaseModel):
-    name: str = "My Watchlist"
+    name: str = Field(default="My Watchlist", max_length=100)
 
 
 
@@ -107,7 +107,7 @@ class WatchlistOut(OrmBase):
 
 
 class AddSymbolRequest(BaseModel):
-    symbol: str
+    symbol: str = Field(min_length=1, max_length=20)
 
 
 # ── Market Snapshot ───────────────────────────────────────────────────────────
@@ -225,7 +225,9 @@ class CandlesResponse(BaseModel):
 # ── Observation ───────────────────────────────────────────────────────────────
 class CommitObservationsRequest(BaseModel):
     watchlist_id: str
-    symbol_ids: List[str] | None = None   # None = commit all symbols in watchlist
+    # None = commit all symbols in watchlist. max_length bounds the batched
+    # IN (...) query cost — 500 comfortably exceeds any realistic watchlist.
+    symbol_ids: List[str] | None = Field(default=None, max_length=500)
 
 
 # ── Health ────────────────────────────────────────────────────────────────────

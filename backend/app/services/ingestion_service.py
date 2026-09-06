@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -55,6 +56,17 @@ _INDIAN_SUFFIXES = (".NS", ".BO")
 # configured resolves to None once and stays that way (no key won't
 # suddenly appear at runtime), so it's simply never tried again.
 _provider_instances: dict[str, MarketDataProvider | None] = {}
+
+# Small in-process circuit breaker, keyed by provider name (same convention
+# as ingestion_stats["provider_failures"]) — not a full circuit-breaker
+# library, just enough to stop re-burning ~7s of Finnhub retry/backoff per
+# symbol, every single 45s poll cycle, during a sustained rate-limit
+# condition. A provider that hits 3 consecutive failures is skipped for 60s;
+# a single success resets its counter.
+_provider_cooldown_until: dict[str, datetime] = {}
+_consecutive_failures: dict[str, int] = defaultdict(int)
+_CONSECUTIVE_FAILURE_THRESHOLD = 3
+_PROVIDER_COOLDOWN_SECONDS = 60
 
 
 def _get_named_provider(name: str) -> MarketDataProvider | None:
@@ -115,11 +127,24 @@ async def get_quote_with_fallback_chain(symbol: str) -> tuple[QuoteData | None, 
     data, or that the whole chain was exhausted.
     """
     tried: list[str] = []
+    now = datetime.now(tz=timezone.utc)
     for name, provider in _chain_for(symbol):
+        cooldown = _provider_cooldown_until.get(name)
+        if cooldown and now < cooldown:
+            logger.debug("%s in cooldown until %s — skipping for %s", name, cooldown, symbol)
+            continue
         tried.append(name)
         quote = await provider.get_quote(symbol)
         if quote:
+            _consecutive_failures[name] = 0
             return quote, tried
+        _consecutive_failures[name] += 1
+        if _consecutive_failures[name] >= _CONSECUTIVE_FAILURE_THRESHOLD:
+            _provider_cooldown_until[name] = now + timedelta(seconds=_PROVIDER_COOLDOWN_SECONDS)
+            logger.warning(
+                "%s hit %d consecutive failures — cooling down %ds",
+                name, _consecutive_failures[name], _PROVIDER_COOLDOWN_SECONDS,
+            )
         logger.warning("%s failed for %s — trying next provider in chain", name, symbol)
     return None, tried
 

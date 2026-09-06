@@ -5,17 +5,19 @@ from __future__ import annotations
 
 import zoneinfo
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user
 from app.auth.security import create_access_token, hash_password, verify_password
+from app.config import settings
 from app.database import get_db
 from app.models import User
 from app.schemas import LoginRequest, SignupRequest, TokenResponse, UpdateProfileRequest, UserOut
 from app.schemas import WatchlistCreate
 from app.services import watchlist_service
+from app.utils.rate_limit import check_rate_limit
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -34,7 +36,12 @@ def _valid_timezone(tz: str | None) -> str:
 
 
 @router.post("/signup", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
-async def signup(payload: SignupRequest, db: AsyncSession = Depends(get_db)):
+async def signup(payload: SignupRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    check_rate_limit(
+        f"signup:{request.client.host if request.client else 'unknown'}",
+        settings.rate_limit_signup_max,
+        settings.rate_limit_signup_window_seconds,
+    )
     email = payload.email.strip().lower()
     if not email or "@" not in email:
         raise HTTPException(status_code=422, detail="Invalid email")
@@ -66,7 +73,12 @@ async def signup(payload: SignupRequest, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(payload: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    check_rate_limit(
+        f"login:{request.client.host if request.client else 'unknown'}",
+        settings.rate_limit_login_max,
+        settings.rate_limit_login_window_seconds,
+    )
     email = payload.email.strip().lower()
     result = await db.execute(select(User).where(User.email == email))
     user = result.scalar_one_or_none()

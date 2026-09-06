@@ -33,18 +33,28 @@ async def generate_explanation(prompt: str) -> str | None:
         return None
     try:
         import asyncio
+
+        from google.genai import types
+
         loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
-            None,
-            lambda: client.models.generate_content(
-                # gemini-2.0-flash was retired by Google; 3.6-flash is the
-                # current equivalent and works with this key (verified).
-                model="gemini-3.6-flash",
-                contents=prompt,
+        response = await asyncio.wait_for(
+            loop.run_in_executor(
+                None,
+                lambda: client.models.generate_content(
+                    # gemini-2.0-flash was retired by Google; 3.6-flash is the
+                    # current equivalent and works with this key (verified).
+                    model="gemini-3.6-flash",
+                    contents=prompt,
+                    # Prompt already asks for ~35 words (~50 tokens); 80 is a
+                    # generous hard ceiling that enforces a real bound
+                    # without truncating a slightly verbose response mid-sentence.
+                    config=types.GenerateContentConfig(max_output_tokens=80),
+                ),
             ),
+            timeout=settings.gemini_timeout_seconds,
         )
         text = response.text.strip()
         return text if text else None
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 — includes asyncio.TimeoutError
         logger.warning("Gemini call failed: %s", exc)
         return None

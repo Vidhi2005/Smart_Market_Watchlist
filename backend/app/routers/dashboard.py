@@ -9,7 +9,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.admin import require_admin
 from app.auth.dependencies import get_current_user
+from app.config import settings
 from app.database import get_db
 from app.engine.market_calendar import is_market_open, is_indian_market_open
 from app.models import (
@@ -25,6 +27,7 @@ from app.schemas import (
     QuoteOut,
 )
 from app.services import attention_service, observation_service, watchlist_service
+from app.utils.rate_limit import check_rate_limit
 
 router = APIRouter(prefix="/api", tags=["dashboard"])
 
@@ -96,6 +99,16 @@ async def commit_observations(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # Ownership check — every other endpoint that accepts a watchlist_id
+    # (get_quotes above, add_symbol, remove_symbol, demo_scenario below)
+    # verifies it belongs to the caller before touching it; this one didn't,
+    # which let a caller who knew/guessed another user's watchlist_id read
+    # its symbol composition indirectly and, via the demo-cleanup branch,
+    # delete WatchlistItem rows from a watchlist they don't own.
+    wl = await watchlist_service.get_watchlist(db, payload.watchlist_id, current_user.id)
+    if not wl:
+        raise HTTPException(status_code=404, detail="Watchlist not found")
+
     updated = await observation_service.commit_observations(
         db,
         user_id=current_user.id,
@@ -193,17 +206,18 @@ async def dashboard(
 
 
 # ── Admin: manual trigger ─────────────────────────────────────────────────────
-# Unauthenticated + unthrottled, this endpoint lets anyone on the internet
-# force real calls against the shared Finnhub free-tier quota. Auth turns
-# "anyone" into "a real account"; the cooldown stops even a real account
-# from hammering it (this is also the frontend's "Refresh" button).
+# Global, expensive (real provider calls across every tracked symbol) and
+# genuinely administrative — gated by require_admin (ADMIN_EMAILS), not just
+# "any authenticated user." The cooldown below additionally protects the
+# shared Finnhub free-tier quota even for an actual admin account (this is
+# also the frontend's "Refresh" button).
 
 _last_trigger_at: datetime | None = None
 _TRIGGER_COOLDOWN_SECONDS = 30
 
 
 @router.post("/admin/trigger-poll")
-async def trigger_poll(current_user: User = Depends(get_current_user)):
+async def trigger_poll(current_user: User = Depends(require_admin)):
     """Manually trigger a market data poll (for demos)."""
     global _last_trigger_at
     import asyncio
@@ -234,6 +248,20 @@ async def demo_scenario(
     live demos that don't depend on the market doing something interesting
     at the right moment (or on any external API being reachable at all).
     """
+    if not settings.demo_mode_enabled:
+        # 404, not 403 — matches this app's existing convention of not
+        # revealing endpoint existence via a distinct "forbidden" status.
+        raise HTTPException(status_code=404, detail="Demo mode is disabled")
+
+    # No cooldown existed here before — unlike trigger-poll, each call can
+    # fire up to 5 Gemini explanation calls and rewrite shared snapshot/event
+    # rows for 5 real tickers, with zero throttle.
+    check_rate_limit(
+        f"demo:{current_user.id}",
+        settings.rate_limit_demo_max,
+        settings.rate_limit_demo_window_seconds,
+    )
+
     wl = await watchlist_service.get_watchlist(db, watchlist_id, current_user.id)
     if not wl:
         raise HTTPException(status_code=404, detail="Watchlist not found")

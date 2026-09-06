@@ -55,6 +55,25 @@ class TestQuoteFallbackChain:
     without hitting the network.
     """
 
+    @pytest.fixture(autouse=True)
+    def _reset_provider_state(self):
+        """
+        The circuit breaker's cooldown/failure-count dicts are module-level
+        globals (by design — see ingestion_service.py), so without this
+        reset, a provider that racks up 3 failures across earlier tests in
+        this class gets cooled down and silently skipped in a later,
+        unrelated test.
+        """
+        from app.services import ingestion_service as svc
+
+        svc._provider_instances.clear()
+        svc._provider_cooldown_until.clear()
+        svc._consecutive_failures.clear()
+        yield
+        svc._provider_instances.clear()
+        svc._provider_cooldown_until.clear()
+        svc._consecutive_failures.clear()
+
     async def test_primary_success_never_calls_secondary(self):
         from app.services import ingestion_service as svc
 
@@ -175,3 +194,35 @@ class TestQuoteFallbackChain:
         assert "alpha_vantage" not in tried
         assert tried == ["finnhub", "yfinance"]
         svc._provider_instances.clear()
+
+    async def test_provider_in_cooldown_is_skipped(self):
+        """After 3 consecutive failures a provider is skipped for a cooldown
+        window rather than being retried on every single symbol every poll
+        cycle — this is what stops a sustained rate-limit condition from
+        re-burning Finnhub's retry/backoff cost on every symbol, every 45s."""
+        from app.services import ingestion_service as svc
+
+        with patch("app.config.settings.us_provider_chain", "finnhub,yfinance"), \
+             patch("app.config.settings.finnhub_api_key", "fake-key"), \
+             patch(
+                 "app.providers.finnhub_provider.FinnhubProvider.get_quote",
+                 new=AsyncMock(return_value=None),
+             ) as finnhub_mock, \
+             patch(
+                 "app.providers.yfinance_provider.YFinanceProvider.get_quote",
+                 new=AsyncMock(return_value=_quote(97.0, "yfinance")),
+             ):
+            for _ in range(svc._CONSECUTIVE_FAILURE_THRESHOLD):
+                quote, tried = await svc.get_quote_with_fallback_chain("AAPL")
+                assert "finnhub" in tried
+
+            assert "finnhub" in svc._provider_cooldown_until
+
+            # One more call, same failing mock still installed — finnhub
+            # must now be skipped entirely rather than attempted again.
+            quote, tried = await svc.get_quote_with_fallback_chain("AAPL")
+
+        assert quote is not None
+        assert quote.source == "yfinance"
+        assert "finnhub" not in tried
+        assert tried == ["yfinance"]

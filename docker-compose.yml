@@ -2,6 +2,10 @@
 services:
   db:
     image: postgres:16-alpine
+    # POSTGRES_PASSWORD below is a trivial local-dev credential — this
+    # compose file is for local development only. If Postgres is ever run
+    # via this file (or a copy of it) anywhere publicly reachable, override
+    # the password with a real deployment-specific secret first.
     environment:
       POSTGRES_USER: smartwatchlist
       POSTGRES_PASSWORD: smartwatchlist

@@ -30,11 +30,23 @@ class YFinanceProvider(MarketDataProvider):
 
     # ── Internal ──────────────────────────────────────────────────────────────
 
+    _TIMEOUT_SECONDS = 10.0
+
     @staticmethod
-    def _run_sync(fn):
-        """Run a blocking callable in the event-loop's thread-pool executor."""
+    async def _run_sync(fn):
+        """
+        Run a blocking callable in the event-loop's thread-pool executor,
+        bounded by a timeout. yfinance had no timeout at all before this —
+        a hung call would occupy an executor thread indefinitely. Note:
+        wait_for cancels the *await*, not the underlying thread — a
+        genuinely hung sync call still occupies a worker until it returns
+        or the process exits; this bounds request-level latency, it doesn't
+        forcibly kill the thread.
+        """
         loop = asyncio.get_event_loop()
-        return loop.run_in_executor(None, fn)
+        return await asyncio.wait_for(
+            loop.run_in_executor(None, fn), timeout=YFinanceProvider._TIMEOUT_SECONDS
+        )
 
     # ── Quote ─────────────────────────────────────────────────────────────────
 
