@@ -3,7 +3,7 @@ Application settings — loaded from environment / .env file.
 """
 from typing import Literal, Optional
 
-from pydantic import model_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Values that must never be treated as a real production JWT secret — the
@@ -31,6 +31,23 @@ class Settings(BaseSettings):
         "postgresql+asyncpg://smartwatchlist:smartwatchlist"
         "@localhost:5432/smart_market_watchlist"
     )
+
+    @field_validator("database_url", mode="after")
+    @classmethod
+    def _normalize_database_url(cls, v: str) -> str:
+        """
+        Hosting platforms (Render, Heroku, Railway) commonly hand out a
+        plain postgresql:// or postgres:// connection string — this app's
+        engine is async and requires the asyncpg driver be named explicitly
+        in the URL scheme, or create_async_engine() raises immediately at
+        import time. Normalize rather than require every deploy target to
+        know this app-specific detail.
+        """
+        if v.startswith("postgres://"):
+            v = "postgresql://" + v[len("postgres://"):]
+        if v.startswith("postgresql://"):
+            v = "postgresql+asyncpg://" + v[len("postgresql://"):]
+        return v
 
     # ── Market Data ───────────────────────────────────────────────────────────
     finnhub_api_key: str = ""
